@@ -69,8 +69,18 @@ tasks:
       - "go.mod"
       - "go.sum"
       - ".golangci.yml"
+      - "charts/**/*"
     cmds:
       - golangci-lint run ./...
+      - task: lint:chart
+
+  lint:chart:
+    desc: "Lint and schema-validate the Helm chart"
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - helm lint charts/shpiel --quiet
+      - helm template shpiel charts/shpiel | kubeconform -strict -ignore-missing-schemas
+      - helm template shpiel charts/shpiel --set persistence.data.enabled=true --set serviceMonitor.enabled=true --set hpa.enabled=true --set pdb.enabled=true | kubeconform -strict -ignore-missing-schemas
 
   lint:vet:
     desc: "Run go vet only"

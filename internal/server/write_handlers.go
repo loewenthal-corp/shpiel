@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/loewenthal-corp/shpiel/internal/audit"
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
 	"github.com/loewenthal-corp/shpiel/internal/relay"
 )
@@ -31,7 +32,8 @@ var lfsExtensions = map[string]bool{
 
 // handleCreateRepo serves POST /api/repos/create.
 func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeWrite(w, r) {
+	actor, ok := s.authorizeWrite(w, r)
+	if !ok {
 		return
 	}
 	var req hfapi.CreateRepoRequest
@@ -68,6 +70,7 @@ func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
+	s.audit.Record(audit.Event{Action: "repo_create", Actor: actor, Repo: repo.String()})
 	writeJSON(w, http.StatusOK, hfapi.CreateRepoResponse{
 		URL:  repoURL,
 		Name: repo.String(),
@@ -77,7 +80,8 @@ func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteRepo serves DELETE /api/repos/delete.
 func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeWrite(w, r) {
+	actor, ok := s.authorizeWrite(w, r)
+	if !ok {
 		return
 	}
 	var req hfapi.DeleteRepoRequest
@@ -100,6 +104,7 @@ func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
+	s.audit.Record(audit.Event{Action: "repo_delete", Actor: actor, Repo: repo.String()})
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
@@ -116,7 +121,7 @@ func repoFromCreatePayload(name, organization string) (hfapi.RepoID, error) {
 // tells the client which files ship inline in the commit versus through
 // the LFS flow.
 func (s *Server) handlePreupload(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeWrite(w, r) {
+	if _, ok := s.authorizeWrite(w, r); !ok {
 		return
 	}
 	route := routeFrom(r)
@@ -161,7 +166,7 @@ func uploadModeFor(p string, size int64, sampleB64 string) string {
 // backend already holds get no actions — the client skips those uploads,
 // which is blob-level dedup across commits and fine-tunes.
 func (s *Server) handleLFSBatch(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeWrite(w, r) {
+	if _, ok := s.authorizeWrite(w, r); !ok {
 		return
 	}
 	route := routeFrom(r)
@@ -215,7 +220,8 @@ func isSHA256Hex(s string) bool {
 // handleLFSUpload serves PUT /shpiel-lfs/{models|datasets}/{id}/{oid}, the
 // href minted by the batch API. Content is digest-verified by the backend.
 func (s *Server) handleLFSUpload(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeWrite(w, r) {
+	actor, ok := s.authorizeWrite(w, r)
+	if !ok {
 		return
 	}
 	segs := strings.Split(strings.Trim(r.PathValue("rest"), "/"), "/")
@@ -254,12 +260,17 @@ func (s *Server) handleLFSUpload(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
+	s.audit.Record(audit.Event{
+		Action: "lfs_upload", Actor: actor, Repo: repo.String(),
+		Digest: "sha256:" + oid, Detail: map[string]any{"bytes": size},
+	})
 	w.WriteHeader(http.StatusOK)
 }
 
 // handleCommit serves POST /api/{type}s/{id}/commit/{rev} (NDJSON).
 func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeWrite(w, r) {
+	actor, ok := s.authorizeWrite(w, r)
+	if !ok {
 		return
 	}
 	route := routeFrom(r)
@@ -280,6 +291,14 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.metrics.Commits.WithLabelValues("ok").Inc()
+	s.audit.Record(audit.Event{
+		Action: "commit", Actor: actor, Repo: route.Repo.String(),
+		Revision: revision(route), Commit: result.CommitSHA,
+		Detail: map[string]any{
+			"summary": ops.Summary, "files": len(ops.Files) + len(ops.LFSFiles),
+			"deleted": len(ops.DeletedFiles) + len(ops.DeletedFolders),
+		},
+	})
 	scheme, host := requestSchemeHost(r)
 	writeJSON(w, http.StatusOK, hfapi.CommitResponse{
 		CommitURL:  fmt.Sprintf("%s://%s/%s/commit/%s", scheme, host, route.Repo, result.CommitSHA),

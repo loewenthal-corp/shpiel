@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ type tokenValidator struct {
 
 type tokenVerdict struct {
 	ok      bool
+	name    string // identity from upstream whoami, for audit records
 	expires time.Time
 }
 
@@ -43,7 +45,7 @@ func (v *tokenValidator) get(token string) (verdict tokenVerdict, found bool) {
 	return verdict, found
 }
 
-func (v *tokenValidator) put(token string, ok bool) {
+func (v *tokenValidator) put(token string, ok bool, name string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	// Cap the cache so a spray of unique bad tokens cannot grow it
@@ -51,47 +53,58 @@ func (v *tokenValidator) put(token string, ok bool) {
 	if len(v.entries) > 10_000 {
 		v.entries = map[string]tokenVerdict{}
 	}
-	v.entries[token] = tokenVerdict{ok: ok, expires: time.Now().Add(v.ttl)}
+	v.entries[token] = tokenVerdict{ok: ok, name: name, expires: time.Now().Add(v.ttl)}
 }
 
-// authorizeWrite gates write endpoints. mode "none" admits everything;
-// mode "passthrough" requires a token upstream vouches for. On upstream
-// outage it fails closed for writes (reads are unaffected).
-func (s *Server) authorizeWrite(w http.ResponseWriter, r *http.Request) bool {
+// authorizeWrite gates write endpoints and returns the authenticated actor
+// for audit records. mode "none" admits everything anonymously; mode
+// "passthrough" requires a token upstream vouches for and yields the
+// upstream identity. On upstream outage it fails closed for writes (reads
+// are unaffected).
+func (s *Server) authorizeWrite(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if s.cfg.Auth.Mode != "passthrough" {
-		return true
+		return "anonymous", true
 	}
 	token := bearerToken(r)
 	if token == "" {
 		writeHFError(w, http.StatusUnauthorized, "", "Invalid credentials in Authorization header")
-		return false
+		return "", false
 	}
-	ok, err := s.validateToken(r.Context(), token)
+	ok, name, err := s.validateToken(r.Context(), token)
 	if err != nil {
 		writeHFError(w, http.StatusBadGateway, "", "Token validation against upstream failed.")
-		return false
+		return "", false
 	}
 	if !ok {
 		writeHFError(w, http.StatusUnauthorized, "", "Invalid user token.")
-		return false
+		return "", false
 	}
-	return true
+	return name, true
 }
 
-func (s *Server) validateToken(ctx context.Context, token string) (bool, error) {
+func (s *Server) validateToken(ctx context.Context, token string) (bool, string, error) {
 	if verdict, found := s.tokens.get(token); found {
-		return verdict.ok, nil
+		return verdict.ok, verdict.name, nil
 	}
 	if s.upstream == nil {
-		return false, nil
+		return false, "", nil
 	}
-	status, _, err := s.upstream.WhoAmI(ctx, token)
+	status, body, err := s.upstream.WhoAmI(ctx, token)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	ok := status == http.StatusOK
-	s.tokens.put(token, ok)
-	return ok, nil
+	name := ""
+	if ok {
+		var who struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(body, &who); err == nil {
+			name = who.Name
+		}
+	}
+	s.tokens.put(token, ok, name)
+	return ok, name, nil
 }
 
 // repoKindFromType maps the "type" field of repo create/delete payloads.

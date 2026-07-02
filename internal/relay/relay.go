@@ -33,6 +33,13 @@ var (
 	ErrNoRoute          = errors.New("relay: no route for repo")
 )
 
+// Replicator receives fan-out work after successful primary writes; the
+// replication queue implements it.
+type Replicator interface {
+	EnqueueCommit(kind hfapi.RepoKind, repo hfapi.RepoID, source, commitSHA string, refs map[string]string, targets []string) error
+	EnqueueDeleteRepo(kind hfapi.RepoKind, repo hfapi.RepoID, source string, targets []string) error
+}
+
 // Relay serves manifests and blobs, pulling through from upstream on miss.
 type Relay struct {
 	router          *Router
@@ -40,6 +47,7 @@ type Relay struct {
 	refreshInterval time.Duration
 	metrics         *metrics.Metrics
 	log             *slog.Logger
+	replicator      Replicator // nil disables fan-out
 
 	manifestSF singleflight.Group
 	blobSF     singleflight.Group
@@ -57,6 +65,8 @@ type Options struct {
 	RefreshInterval time.Duration
 	Metrics         *metrics.Metrics
 	Log             *slog.Logger
+	// Replicator receives async fan-out work for routes with replicas.
+	Replicator Replicator
 }
 
 // New creates a Relay.
@@ -71,6 +81,7 @@ func New(opts Options) *Relay {
 		refreshInterval: opts.RefreshInterval,
 		metrics:         opts.Metrics,
 		log:             log,
+		replicator:      opts.Replicator,
 	}
 }
 

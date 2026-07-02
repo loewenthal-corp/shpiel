@@ -65,8 +65,14 @@ uploads flow through the CAS API (token endpoints, xorb + shard ingest)
 with no client-side flags, files materialize into the routed backend for
 plain-HTTP consumers, and `hf_xet` clients download at chunk level through
 the reconstruction API. With xet off, hub-1.x pushers set
-`HF_HUB_DISABLE_XET=1` (hub 1.x has no LFS fallback). S3 backend, fan-out
-replication, Helm chart, and global chunk dedup are next — see
+`HF_HUB_DISABLE_XET=1` (hub 1.x has no LFS fallback). **M2 (ops)**:
+fan-out replication to route replicas through a disk-spooled retry queue
+(no database, restart-safe), an authenticated admin API (backend health,
+replication status, config view), an append-only audit stream, a Helm
+chart whose values map 1:1 to config.yaml ([charts/shpiel](charts/shpiel)),
+a Grafana dashboard ([dashboards/](dashboards)), and the
+[Spegel reference architecture](docs/spegel.md) with a cold-pull benchmark
+harness. S3 backend and global chunk dedup are next — see
 [spec.md](spec.md) §9.
 
 ## Development

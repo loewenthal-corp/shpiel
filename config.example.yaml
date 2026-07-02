@@ -54,16 +54,29 @@ backends:
 
 routes:
   # First match wins. Globs use "/" between owner and name; "*" alone
-  # matches everything.
+  # matches everything. Replicas receive pushes asynchronously through the
+  # replication queue (primary is acknowledged synchronously).
   # - match: "exigence/*"
   #   primary: zot
   #   replicas: [archive]
   - match: "*"
     primary: cache
 
+# Async fan-out to route replicas: a disk-spooled retry queue, restart-safe
+# with no database. Required when any route declares replicas.
+replication:
+  # spool_dir: /var/lib/shpiel-replication
+  workers: 4
+
 auth:
   mode: none # none | passthrough (local, oidc: v1.x)
   cache_ttl: 5m
+
+# Admin API (replication status, backend health, config view) on its own
+# listener — enable by setting listen.admin above plus a token:
+admin:
+# token_env: SHPIEL_ADMIN_TOKEN   # required with listen.admin; requests
+#                                 # use Authorization: Bearer <token>
 
 # Xet protocol support: with it on, huggingface_hub 1.x uploads work with
 # no client-side flags (hub 1.x has no LFS fallback), and hf_xet clients
@@ -77,3 +90,6 @@ xet:
 log:
   level: info # debug | info | warn | error
   format: json # json | text
+  # Append-only audit stream (JSON lines) of writes and admin actions:
+  # who/what/when/digest. "-" writes to stderr; empty disables.
+  # audit_path: /var/log/shpiel/audit.log

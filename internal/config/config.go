@@ -19,14 +19,41 @@ import (
 
 // Config is the root configuration.
 type Config struct {
-	Listen   Listen                   `yaml:"listen"`
-	Limits   Limits                   `yaml:"limits"`
-	Upstream Upstream                 `yaml:"upstream"`
-	Backends map[string]BackendConfig `yaml:"backends"`
-	Routes   []Route                  `yaml:"routes"`
-	Auth     Auth                     `yaml:"auth"`
-	Xet      Xet                      `yaml:"xet"`
-	Log      Log                      `yaml:"log"`
+	Listen      Listen                   `yaml:"listen"`
+	Limits      Limits                   `yaml:"limits"`
+	Upstream    Upstream                 `yaml:"upstream"`
+	Backends    map[string]BackendConfig `yaml:"backends"`
+	Routes      []Route                  `yaml:"routes"`
+	Replication Replication              `yaml:"replication"`
+	Auth        Auth                     `yaml:"auth"`
+	Admin       Admin                    `yaml:"admin"`
+	Xet         Xet                      `yaml:"xet"`
+	Log         Log                      `yaml:"log"`
+}
+
+// Replication configures async fan-out to route replicas.
+type Replication struct {
+	// SpoolDir persists the retry queue (one JSON file per pending job);
+	// required when any route declares replicas.
+	SpoolDir string `yaml:"spool_dir,omitempty"`
+	// Workers bounds concurrent replication jobs (default 4).
+	Workers int `yaml:"workers,omitempty"`
+}
+
+// Admin configures the admin API listener (listen.admin).
+type Admin struct {
+	// TokenEnv names the environment variable holding the bearer token
+	// required on every admin request; the admin listener refuses to
+	// start without it.
+	TokenEnv string `yaml:"token_env,omitempty"`
+}
+
+// Token reads the admin token from the configured environment variable.
+func (a Admin) Token() string {
+	if a.TokenEnv == "" {
+		return ""
+	}
+	return os.Getenv(a.TokenEnv)
 }
 
 // Listen configures the server listeners. Admin and metrics are disabled
@@ -129,6 +156,10 @@ type Xet struct {
 type Log struct {
 	Level  string `yaml:"level"`  // "debug" | "info" | "warn" | "error"
 	Format string `yaml:"format"` // "json" | "text"
+	// AuditPath appends JSON audit records (writes and admin actions:
+	// who/what/when/digest) to a file; "-" writes them to stderr; empty
+	// disables the audit stream.
+	AuditPath string `yaml:"audit_path,omitempty"`
 }
 
 // Default returns the baseline configuration that YAML, env, and flags
@@ -253,6 +284,7 @@ func (c *Config) Validate() error {
 	if len(c.Routes) == 0 && len(c.Backends) > 0 {
 		errs = append(errs, errors.New("at least one route is required, e.g. {match: \"*\", primary: <backend>}"))
 	}
+	hasReplicas := false
 	for i, r := range c.Routes {
 		if r.Match == "" {
 			errs = append(errs, fmt.Errorf("routes[%d]: match is required", i))
@@ -261,10 +293,17 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("routes[%d]: primary %q is not a configured backend", i, r.Primary))
 		}
 		for _, rep := range r.Replicas {
+			hasReplicas = true
 			if _, ok := c.Backends[rep]; !ok {
 				errs = append(errs, fmt.Errorf("routes[%d]: replica %q is not a configured backend", i, rep))
 			}
 		}
+	}
+	if hasReplicas && c.Replication.SpoolDir == "" {
+		errs = append(errs, errors.New("routes declare replicas: replication.spool_dir is required"))
+	}
+	if c.Listen.Admin != "" && c.Admin.TokenEnv == "" {
+		errs = append(errs, errors.New("listen.admin requires admin.token_env (the admin API refuses to run unauthenticated)"))
 	}
 
 	if c.Xet.Enabled && c.Xet.DataDir == "" {

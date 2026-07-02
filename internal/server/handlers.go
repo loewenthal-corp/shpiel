@@ -290,20 +290,26 @@ func (s *Server) handleXetToken(w http.ResponseWriter, r *http.Request) {
 	}
 	route := routeFrom(r)
 	scope := route.Path // "read" or "write", from the URL keyword
-	if scope == "write" && !s.authorizeWrite(w, r) {
-		return
+	actor := "anonymous"
+	if scope == "write" {
+		var ok bool
+		actor, ok = s.authorizeWrite(w, r)
+		if !ok {
+			return
+		}
 	}
 	// Reads follow the read path's openness: mode none serves anonymously,
 	// passthrough validates the caller's token upstream.
 	if scope == "read" && s.cfg.Auth.Mode == "passthrough" {
 		token := bearerToken(r)
-		ok, err := s.validateToken(r.Context(), token)
+		ok, name, err := s.validateToken(r.Context(), token)
 		if err != nil || !ok {
 			writeHFError(w, http.StatusUnauthorized, "", "Invalid user token.")
 			return
 		}
+		actor = name
 	}
-	s.xet.WriteTokenResponse(w, r, scope, route.RepoKind, route.Repo)
+	s.xet.WriteTokenResponse(w, r, scope, route.RepoKind, route.Repo, actor)
 }
 
 // handleWhoAmI serves GET /api/whoami-v2. In passthrough mode the call is

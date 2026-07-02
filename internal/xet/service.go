@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/loewenthal-corp/shpiel/internal/audit"
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
 )
 
@@ -58,13 +59,14 @@ type Service struct {
 	store  *Store
 	mat    Materializer
 	log    *slog.Logger
+	audit  *audit.Logger
 	secret []byte
 }
 
 // NewService creates a Service. The signing secret is per-process: tokens
 // and data URLs die on restart, which is fine — clients refresh through
-// the token endpoints.
-func NewService(store *Store, mat Materializer, log *slog.Logger) (*Service, error) {
+// the token endpoints. auditLog may be nil.
+func NewService(store *Store, mat Materializer, log *slog.Logger, auditLog *audit.Logger) (*Service, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -72,7 +74,7 @@ func NewService(store *Store, mat Materializer, log *slog.Logger) (*Service, err
 	if _, err := rand.Read(secret); err != nil {
 		return nil, fmt.Errorf("xet: generating signing secret: %w", err)
 	}
-	return &Service{store: store, mat: mat, log: log, secret: secret}, nil
+	return &Service{store: store, mat: mat, log: log, audit: auditLog, secret: secret}, nil
 }
 
 // Store exposes the underlying store (resolve headers use it).
@@ -84,13 +86,15 @@ type tokenClaims struct {
 	Scope string         `json:"s"` // "read" | "write"
 	Kind  hfapi.RepoKind `json:"k"`
 	Repo  string         `json:"r"`
+	User  string         `json:"u,omitempty"` // identity for audit records
 	Exp   int64          `json:"e"`
 }
 
 // MintToken issues a CAS access token scoped to a repo; scope is "read" or
-// "write" (write implies read).
-func (s *Service) MintToken(scope string, kind hfapi.RepoKind, repo hfapi.RepoID) (token string, expiry int64) {
-	claims := tokenClaims{Scope: scope, Kind: kind, Repo: repo.String(), Exp: time.Now().Add(tokenTTL).Unix()}
+// "write" (write implies read). user is the authenticated identity carried
+// into CAS-side audit records.
+func (s *Service) MintToken(scope string, kind hfapi.RepoKind, repo hfapi.RepoID, user string) (token string, expiry int64) {
+	claims := tokenClaims{Scope: scope, Kind: kind, Repo: repo.String(), User: user, Exp: time.Now().Add(tokenTTL).Unix()}
 	payload, _ := json.Marshal(claims)
 	body := base64.RawURLEncoding.EncodeToString(payload)
 	return "sxet1." + body + "." + s.sign(body), claims.Exp
@@ -135,8 +139,8 @@ func (s *Service) sign(payload string) string {
 // WriteTokenResponse answers a xet-{read,write}-token request: connection
 // info rides in response headers (that is where huggingface_hub looks),
 // with a JSON body mirroring it for debuggability.
-func (s *Service) WriteTokenResponse(w http.ResponseWriter, r *http.Request, scope string, kind hfapi.RepoKind, repo hfapi.RepoID) {
-	token, exp := s.MintToken(scope, kind, repo)
+func (s *Service) WriteTokenResponse(w http.ResponseWriter, r *http.Request, scope string, kind hfapi.RepoKind, repo hfapi.RepoID, user string) {
+	token, exp := s.MintToken(scope, kind, repo, user)
 	casURL := requestBaseURL(r) + "/xet"
 	h := w.Header()
 	h.Set(HeaderCasURL, casURL)
@@ -184,6 +188,13 @@ func (s *Service) HandleXorbUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.InfoContext(r.Context(), "xet xorb ingested",
 		"hash", hash.Hex(), "bytes", len(body), "inserted", inserted)
+	if inserted {
+		claims, _ := s.verifyBearer(r, "write")
+		s.audit.Record(audit.Event{
+			Action: "xet_xorb", Actor: claims.User, Repo: claims.Repo,
+			Digest: "xet:" + hash.Hex(), Detail: map[string]any{"bytes": len(body)},
+		})
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"was_inserted": inserted})
 }
@@ -236,6 +247,11 @@ func (s *Service) HandleShardUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		s.log.InfoContext(r.Context(), "xet file registered",
 			"file", rec.FileHash, "sha256", rec.SHA256, "bytes", rec.TotalLen, "terms", len(rec.Terms))
+		s.audit.Record(audit.Event{
+			Action: "xet_shard_file", Actor: claims.User, Repo: claims.Repo,
+			Digest: "sha256:" + rec.SHA256,
+			Detail: map[string]any{"xetHash": rec.FileHash, "bytes": rec.TotalLen, "terms": len(rec.Terms)},
+		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]int{"result": 1})

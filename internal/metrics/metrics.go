@@ -24,6 +24,9 @@ type Metrics struct {
 	PullThroughFetches *prometheus.CounterVec   // kind, outcome
 	Commits            *prometheus.CounterVec   // outcome
 	InflightRequests   prometheus.Gauge
+
+	ReplicationQueueDepth prometheus.Gauge
+	ReplicationJobs       *prometheus.CounterVec // target, outcome
 }
 
 // New creates a Metrics with its own registry, including the standard Go
@@ -61,10 +64,19 @@ func New() *Metrics {
 			Name: "shpiel_http_inflight_requests",
 			Help: "HTTP requests currently being served.",
 		}),
+		ReplicationQueueDepth: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "shpiel_replication_queue_depth",
+			Help: "Replication jobs waiting or retrying.",
+		}),
+		ReplicationJobs: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "shpiel_replication_jobs_total",
+			Help: "Replication job executions, by target backend and outcome.",
+		}, []string{"target", "outcome"}),
 	}
 	reg.MustRegister(
 		m.HTTPRequests, m.HTTPDuration, m.DownloadBytes, m.UploadBytes,
 		m.PullThroughFetches, m.Commits, m.InflightRequests,
+		m.ReplicationQueueDepth, m.ReplicationJobs,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)

@@ -1,0 +1,16 @@
+Shpiel is deploying.
+
+Point HF tooling at it:
+
+  export HF_ENDPOINT=http://{{ include "shpiel.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.ports.api }}
+
+Everything HF works unchanged from there:
+
+  hf download org/model
+  hf upload org/model ./local-dir
+
+The chart's `config` value is Shpiel's config.yaml verbatim — see
+config.example.yaml in the repository for the full reference. Remember to
+keep `config.listen` in sync with `service.ports`, backend/xet paths in
+sync with `persistence`, and to provide secrets via `env` (config only
+ever references environment variable NAMES).

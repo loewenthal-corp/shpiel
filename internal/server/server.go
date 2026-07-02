@@ -14,10 +14,12 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/loewenthal-corp/shpiel/internal/audit"
 	"github.com/loewenthal-corp/shpiel/internal/config"
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
 	"github.com/loewenthal-corp/shpiel/internal/metrics"
 	"github.com/loewenthal-corp/shpiel/internal/relay"
+	"github.com/loewenthal-corp/shpiel/internal/replication"
 	"github.com/loewenthal-corp/shpiel/internal/upstream"
 	"github.com/loewenthal-corp/shpiel/internal/xet"
 )
@@ -35,6 +37,10 @@ type Server struct {
 	tokens   *tokenValidator
 	// xet is the CAS service; nil when xet.enabled is false.
 	xet *xet.Service
+	// audit records writes and admin actions; nil disables (nil-safe).
+	audit *audit.Logger
+	// repl powers the admin replication endpoints; nil when no replicas.
+	repl *replication.Queue
 
 	// downloadSem / uploadSem bound concurrent content transfers
 	// (limits.max_concurrent_*); nil means unlimited.
@@ -45,9 +51,18 @@ type Server struct {
 	metricsListener net.Listener
 }
 
-// New assembles a Server. up and xetSvc may be nil (no upstream / xet
-// disabled).
-func New(cfg config.Config, rl *relay.Relay, up *upstream.Client, xetSvc *xet.Service, m *metrics.Metrics, log *slog.Logger) *Server {
+// Options carries the optional collaborators a Server may run with.
+type Options struct {
+	Upstream *upstream.Client
+	Xet      *xet.Service
+	Audit    *audit.Logger
+	Repl     *replication.Queue
+	Log      *slog.Logger
+}
+
+// New assembles a Server.
+func New(cfg config.Config, rl *relay.Relay, m *metrics.Metrics, opts Options) *Server {
+	log := opts.Log
 	if log == nil {
 		log = slog.Default()
 	}
@@ -56,8 +71,10 @@ func New(cfg config.Config, rl *relay.Relay, up *upstream.Client, xetSvc *xet.Se
 		relay:    rl,
 		metrics:  m,
 		log:      log,
-		upstream: up,
-		xet:      xetSvc,
+		upstream: opts.Upstream,
+		xet:      opts.Xet,
+		audit:    opts.Audit,
+		repl:     opts.Repl,
 		tokens:   newTokenValidator(cfg.Auth.CacheTTL),
 	}
 	if n := cfg.Limits.MaxConcurrentDownloads; n > 0 {
@@ -205,7 +222,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	servers := []*http.Server{api}
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() { errCh <- api.Serve(s.apiListener) }()
 	s.log.Info("api listening", "addr", s.apiListener.Addr().String())
 
@@ -221,6 +238,23 @@ func (s *Server) Run(ctx context.Context) error {
 		servers = append(servers, mSrv)
 		go func() { errCh <- mSrv.Serve(s.metricsListener) }()
 		s.log.Info("metrics listening", "addr", s.metricsListener.Addr().String())
+	}
+
+	if s.cfg.Listen.Admin != "" {
+		adminToken := s.cfg.Admin.Token()
+		if adminToken == "" {
+			_ = api.Close()
+			return fmt.Errorf("server: listen.admin is set but %s resolves to an empty admin token", s.cfg.Admin.TokenEnv)
+		}
+		adminListener, err := net.Listen("tcp", s.cfg.Listen.Admin)
+		if err != nil {
+			_ = api.Close()
+			return fmt.Errorf("server: listening on %s: %w", s.cfg.Listen.Admin, err)
+		}
+		aSrv := &http.Server{Handler: s.adminHandler(adminToken), ReadHeaderTimeout: 10 * time.Second}
+		servers = append(servers, aSrv)
+		go func() { errCh <- aSrv.Serve(adminListener) }()
+		s.log.Info("admin listening", "addr", adminListener.Addr().String())
 	}
 
 	select {

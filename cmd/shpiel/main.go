@@ -89,8 +89,10 @@ func (c *serveCmd) Run() error {
 		"version", buildinfo.String(),
 		"pull_through", a.Relay.PullThroughEnabled(),
 		"backends", len(cfg.Backends),
+		"replication", a.Replication != nil,
+		"xet", cfg.Xet.Enabled,
 	)
-	return a.Server.Run(ctx)
+	return a.Run(ctx)
 }
 
 type configCmd struct {

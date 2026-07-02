@@ -1,20 +1,23 @@
 // Package app assembles a runnable Shpiel from configuration: backends,
-// router, upstream client, relay, metrics, and the HTTP server. The CLI and
-// the test harnesses share this wiring so tests exercise the same object
-// graph production runs.
+// router, upstream client, relay, replication queue, audit stream, and the
+// HTTP server. The CLI and the test harnesses share this wiring so tests
+// exercise the same object graph production runs.
 package app
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 
+	"github.com/loewenthal-corp/shpiel/internal/audit"
 	"github.com/loewenthal-corp/shpiel/internal/backend"
 	"github.com/loewenthal-corp/shpiel/internal/backend/fsbackend"
 	"github.com/loewenthal-corp/shpiel/internal/backend/ocibackend"
 	"github.com/loewenthal-corp/shpiel/internal/config"
 	"github.com/loewenthal-corp/shpiel/internal/metrics"
 	"github.com/loewenthal-corp/shpiel/internal/relay"
+	"github.com/loewenthal-corp/shpiel/internal/replication"
 	"github.com/loewenthal-corp/shpiel/internal/server"
 	"github.com/loewenthal-corp/shpiel/internal/upstream"
 	"github.com/loewenthal-corp/shpiel/internal/xet"
@@ -22,11 +25,23 @@ import (
 
 // App is an assembled Shpiel instance.
 type App struct {
-	Config  config.Config
-	Server  *server.Server
-	Relay   *relay.Relay
-	Metrics *metrics.Metrics
-	Log     *slog.Logger
+	Config      config.Config
+	Server      *server.Server
+	Relay       *relay.Relay
+	Metrics     *metrics.Metrics
+	Replication *replication.Queue
+	Audit       *audit.Logger
+	Log         *slog.Logger
+}
+
+// Run starts the replication workers (when configured) and serves until
+// ctx is canceled.
+func (a *App) Run(ctx context.Context) error {
+	if a.Replication != nil {
+		go a.Replication.Run(ctx)
+	}
+	defer func() { _ = a.Audit.Close() }()
+	return a.Server.Run(ctx)
 }
 
 // Build validates cfg and wires up every component. It does not start
@@ -86,12 +101,41 @@ func Build(cfg config.Config) (*App, error) {
 	}
 
 	m := metrics.New()
+
+	auditLog, err := audit.Open(cfg.Log.AuditPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// The replication queue exists when any route declares replicas; it is
+	// wired into the relay so successful primary writes fan out.
+	var repl *replication.Queue
+	for _, route := range cfg.Routes {
+		if len(route.Replicas) > 0 {
+			repl, err = replication.New(replication.Options{
+				SpoolDir: cfg.Replication.SpoolDir,
+				Backends: backends,
+				Workers:  cfg.Replication.Workers,
+				Log:      log,
+			})
+			if err != nil {
+				return nil, err
+			}
+			repl.Instrument(
+				func(depth int) { m.ReplicationQueueDepth.Set(float64(depth)) },
+				func(target, outcome string) { m.ReplicationJobs.WithLabelValues(target, outcome).Inc() },
+			)
+			break
+		}
+	}
+
 	rl := relay.New(relay.Options{
 		Router:          router,
 		Upstream:        pullThrough,
 		RefreshInterval: cfg.Upstream.HuggingFace.RefreshInterval,
 		Metrics:         m,
 		Log:             log,
+		Replicator:      replicatorOrNil(repl),
 	})
 
 	var xetSvc *xet.Service
@@ -100,19 +144,35 @@ func Build(cfg config.Config) (*App, error) {
 		if err != nil {
 			return nil, err
 		}
-		xetSvc, err = xet.NewService(store, rl, log)
+		xetSvc, err = xet.NewService(store, rl, log, auditLog)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	return &App{
-		Config:  cfg,
-		Server:  server.New(cfg, rl, up, xetSvc, m, log),
-		Relay:   rl,
-		Metrics: m,
-		Log:     log,
+		Config: cfg,
+		Server: server.New(cfg, rl, m, server.Options{
+			Upstream: up,
+			Xet:      xetSvc,
+			Audit:    auditLog,
+			Repl:     repl,
+			Log:      log,
+		}),
+		Relay:       rl,
+		Metrics:     m,
+		Replication: repl,
+		Audit:       auditLog,
+		Log:         log,
 	}, nil
+}
+
+// replicatorOrNil avoids handing the relay a typed-nil interface.
+func replicatorOrNil(q *replication.Queue) relay.Replicator {
+	if q == nil {
+		return nil
+	}
+	return q
 }
 
 func newLogger(cfg config.Log) (*slog.Logger, error) {

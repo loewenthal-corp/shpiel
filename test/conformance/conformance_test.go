@@ -1,11 +1,14 @@
 package conformance
 
 import (
+	"context"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -213,6 +216,79 @@ func TestConformancePullThroughOCI(t *testing.T) {
 			url := newShpielOCI(t, format, hubSrv.URL)
 			Run(t, url, fx)
 		})
+	}
+}
+
+// TestReplicationFanOutAndAudit pushes through the full write protocol on
+// a route with a replica and proves (a) the commit fans out asynchronously
+// — the replica ends up serving the identical read contract — and (b) the
+// audit stream recorded the writes.
+func TestReplicationFanOutAndAudit(t *testing.T) {
+	t.Parallel()
+	replicaDir := t.TempDir()
+	auditPath := filepath.Join(t.TempDir(), "audit.log")
+
+	cfg := config.Default()
+	cfg.Listen.Metrics = ""
+	cfg.Log.Format = "text"
+	cfg.Log.Level = "warn"
+	cfg.Log.AuditPath = auditPath
+	cfg.Backends = map[string]config.BackendConfig{
+		"primary": {Type: "fs", Path: t.TempDir()},
+		"replica": {Type: "fs", Path: replicaDir},
+	}
+	cfg.Routes = []config.Route{{Match: "*", Primary: "primary", Replicas: []string{"replica"}}}
+	cfg.Replication.SpoolDir = t.TempDir()
+
+	a, err := app.Build(cfg)
+	if err != nil {
+		t.Fatalf("app.Build: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go a.Replication.Run(ctx)
+	srv := httptest.NewServer(a.Server.Handler())
+	t.Cleanup(srv.Close)
+
+	fx, err := NewWriteClient(srv.URL, "").PushFixture(BasicFixture())
+	if err != nil {
+		t.Fatalf("PushFixture: %v", err)
+	}
+
+	// Wait for the queue to drain, then serve the read contract from a
+	// SECOND shpiel whose only backend is the replica: bytes, headers, and
+	// error semantics must be identical to the primary.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && a.Replication.Depth() > 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if depth := a.Replication.Depth(); depth != 0 {
+		t.Fatalf("replication queue depth = %d after deadline; jobs: %+v", depth, a.Replication.Snapshot())
+	}
+
+	replicaCfg := config.Default()
+	replicaCfg.Listen.Metrics = ""
+	replicaCfg.Log.Format = "text"
+	replicaCfg.Log.Level = "warn"
+	replicaCfg.Backends = map[string]config.BackendConfig{"replica": {Type: "fs", Path: replicaDir}}
+	replicaCfg.Routes = []config.Route{{Match: "*", Primary: "replica"}}
+	ra, err := app.Build(replicaCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replicaSrv := httptest.NewServer(ra.Server.Handler())
+	t.Cleanup(replicaSrv.Close)
+	Run(t, replicaSrv.URL, fx)
+
+	// The audit stream saw the writes.
+	auditData, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("reading audit log: %v", err)
+	}
+	for _, action := range []string{`"action":"repo_create"`, `"action":"commit"`, `"action":"lfs_upload"`} {
+		if !strings.Contains(string(auditData), action) {
+			t.Errorf("audit log missing %s", action)
+		}
 	}
 }
 

@@ -53,7 +53,25 @@ func (r *Relay) CreateRepo(ctx context.Context, kind hfapi.RepoKind, repo hfapi.
 		return fmt.Errorf("relay: writing initial commit for %s: %w", repo, err)
 	}
 	r.log.InfoContext(ctx, "created repo", "repo", repo.String(), "kind", string(kind), "backend", route.Primary.Name())
+	r.fanOutCommit(ctx, kind, repo, route, m.CommitSHA, map[string]string{hfapi.DefaultRevision: m.CommitSHA})
 	return nil
+}
+
+// fanOutCommit enqueues async replication of a commit to the route's
+// replicas. Enqueue failures are logged, never surfaced: the primary write
+// already succeeded and the admin API exposes replication health.
+func (r *Relay) fanOutCommit(ctx context.Context, kind hfapi.RepoKind, repo hfapi.RepoID, route *Route, commitSHA string, refs map[string]string) {
+	if r.replicator == nil || len(route.Replicas) == 0 {
+		return
+	}
+	targets := make([]string, 0, len(route.Replicas))
+	for _, rep := range route.Replicas {
+		targets = append(targets, rep.Name())
+	}
+	if err := r.replicator.EnqueueCommit(kind, repo, route.Primary.Name(), commitSHA, refs, targets); err != nil {
+		r.log.ErrorContext(ctx, "enqueueing replication failed",
+			"repo", repo.String(), "commit", commitSHA, "error", err)
+	}
 }
 
 // DeleteRepo removes a repo from its routed backend.
@@ -66,6 +84,15 @@ func (r *Relay) DeleteRepo(ctx context.Context, kind hfapi.RepoKind, repo hfapi.
 		return mapBackendErr(err)
 	}
 	r.log.InfoContext(ctx, "deleted repo", "repo", repo.String(), "kind", string(kind), "backend", route.Primary.Name())
+	if r.replicator != nil && len(route.Replicas) > 0 {
+		targets := make([]string, 0, len(route.Replicas))
+		for _, rep := range route.Replicas {
+			targets = append(targets, rep.Name())
+		}
+		if err := r.replicator.EnqueueDeleteRepo(kind, repo, route.Primary.Name(), targets); err != nil {
+			r.log.ErrorContext(ctx, "enqueueing replication delete failed", "repo", repo.String(), "error", err)
+		}
+	}
 	return nil
 }
 
@@ -236,6 +263,7 @@ func (r *Relay) Commit(ctx context.Context, kind hfapi.RepoKind, repo hfapi.Repo
 	r.log.InfoContext(ctx, "commit",
 		"repo", repo.String(), "revision", revision, "commit", m.CommitSHA,
 		"parent", parentSHA, "files", len(sorted), "summary", ops.Summary, "backend", bk.Name())
+	r.fanOutCommit(ctx, kind, repo, route, m.CommitSHA, map[string]string{revision: m.CommitSHA})
 	return &CommitResult{CommitSHA: m.CommitSHA}, nil
 }
 

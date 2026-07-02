@@ -1,0 +1,104 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "shpiel.fullname" . }}
+  labels:
+    {{- include "shpiel.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.hpa.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "shpiel.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "shpiel.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ toYaml .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "shpiel.serviceAccountName" . }}
+      containers:
+        - name: shpiel
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve", "--config", "/etc/shpiel/config.yaml"]
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: api
+              containerPort: {{ .Values.service.ports.api }}
+            - name: metrics
+              containerPort: {{ .Values.service.ports.metrics }}
+            {{- if .Values.config.listen.admin }}
+            - name: admin
+              containerPort: {{ .Values.service.ports.admin }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: api
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/shpiel
+              readOnly: true
+            - name: data
+              mountPath: {{ .Values.persistence.data.mountPath }}
+            - name: xet-data
+              mountPath: {{ .Values.persistence.xet.mountPath }}
+            - name: replication-spool
+              mountPath: {{ .Values.persistence.replication.mountPath }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "shpiel.fullname" . }}-config
+        - name: data
+          {{- if .Values.persistence.data.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "shpiel.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: xet-data
+          {{- if .Values.persistence.xet.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "shpiel.fullname" . }}-xet
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: replication-spool
+          {{- if .Values.persistence.replication.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "shpiel.fullname" . }}-replication
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

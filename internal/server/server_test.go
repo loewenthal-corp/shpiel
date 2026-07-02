@@ -35,7 +35,7 @@ func newTestServer(t *testing.T, mutate func(*config.Config), up *upstream.Clien
 	}
 	m := metrics.New()
 	rl := relay.New(relay.Options{Router: router, Upstream: up, Metrics: m})
-	srv := httptest.NewServer(New(cfg, rl, up, nil, m, nil).Handler())
+	srv := httptest.NewServer(New(cfg, rl, m, Options{Upstream: up}).Handler())
 	t.Cleanup(srv.Close)
 	return srv
 }

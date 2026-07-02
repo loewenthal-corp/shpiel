@@ -1,0 +1,122 @@
+---
+# Shpiel Helm values.
+#
+# The one mental model: `config` below IS Shpiel's config.yaml, rendered
+# verbatim into a ConfigMap (spec §5.4). Everything else here is Kubernetes
+# plumbing around it. Keep `config.listen` ports in sync with
+# `service.ports` and mount paths in sync with `persistence`.
+
+image:
+  repository: ghcr.io/loewenthal-corp/shpiel
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Shpiel's config.yaml, verbatim. See config.example.yaml in the repo for
+# the full reference.
+config:
+  listen:
+    api: ":8080"
+    metrics: ":9090"
+  upstream:
+    huggingface:
+      endpoint: https://huggingface.co
+      pull_through: true
+      refresh_interval: 5m
+  backends:
+    cache:
+      type: fs
+      path: /var/lib/shpiel
+  routes:
+    - match: "*"
+      primary: cache
+  auth:
+    mode: none
+  xet:
+    enabled: true
+    data_dir: /var/lib/shpiel-xet
+  log:
+    level: info
+    format: json
+
+service:
+  type: ClusterIP
+  ports:
+    api: 8080
+    metrics: 9090
+    # admin is only exposed when config.listen.admin is set.
+    admin: 8081
+
+# Environment variables for the container — the way secrets reach Shpiel
+# (config references env names via *_env keys, never values).
+env: []
+#  - name: HF_ORG_TOKEN
+#    valueFrom:
+#      secretKeyRef: { name: shpiel-secrets, key: hf-org-token }
+#  - name: SHPIEL_ADMIN_TOKEN
+#    valueFrom:
+#      secretKeyRef: { name: shpiel-secrets, key: admin-token }
+
+persistence:
+  data:
+    enabled: false
+    mountPath: /var/lib/shpiel
+    size: 500Gi
+    storageClass: ""
+    accessModes: [ReadWriteOnce]
+  xet:
+    enabled: false
+    mountPath: /var/lib/shpiel-xet
+    size: 200Gi
+    storageClass: ""
+    accessModes: [ReadWriteOnce]
+  replication:
+    enabled: false
+    mountPath: /var/lib/shpiel-replication
+    size: 1Gi
+    storageClass: ""
+    accessModes: [ReadWriteOnce]
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}
+
+# HPA targets the read path (spec §6: reads scale horizontally; keep
+# maxReplicas at 1 unless the write path is fronted by sticky sessions).
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  enabled: false
+  minAvailable: 1
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  #  - host: shpiel.internal
+  #    paths:
+  #      - path: /
+  #        pathType: Prefix
+  tls: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

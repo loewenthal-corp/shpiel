@@ -1,0 +1,20 @@
+{{- range $name, $spec := dict "data" .Values.persistence.data "xet" .Values.persistence.xet "replication" .Values.persistence.replication }}
+{{- if $spec.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "shpiel.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "shpiel.labels" $ | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml $spec.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ $spec.size }}
+  {{- if $spec.storageClass }}
+  storageClassName: {{ $spec.storageClass }}
+  {{- end }}
+{{- end }}
+{{- end }}
