@@ -6,11 +6,15 @@
 package relay
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -39,6 +43,8 @@ type Relay struct {
 
 	manifestSF singleflight.Group
 	blobSF     singleflight.Group
+	// repoLocks serializes commits per repo (v1 single-writer, spec §6).
+	repoLocks sync.Map
 }
 
 // Options configure a Relay.
@@ -233,7 +239,7 @@ func (r *Relay) OpenFile(ctx context.Context, kind hfapi.RepoKind, repo hfapi.Re
 		return nil, ErrEntryNotFound
 	}
 
-	if err := r.fetchBlob(ctx, bk, kind, repo, m.CommitSHA, entry, callerToken); err != nil {
+	if err := r.fetchBlob(ctx, bk, kind, repo, m, entry, callerToken); err != nil {
 		return nil, err
 	}
 	rc, err := bk.OpenBlob(ctx, kind, repo, entry.Digest)
@@ -271,11 +277,18 @@ func (r *Relay) backfillDigest(ctx context.Context, bk backend.Backend, kind hfa
 
 // fetchBlob downloads one file at an immutable commit from upstream into
 // the backend, collapsing concurrent fetches of the same blob.
-func (r *Relay) fetchBlob(ctx context.Context, bk backend.Backend, kind hfapi.RepoKind, repo hfapi.RepoID, commitSHA string, entry *backend.FileEntry, callerToken string) error {
+//
+// Storage invariant: blobs are always keyed by their content sha256 (the
+// only address OCI registries speak). LFS entries carry sha256 upstream;
+// regular files only have a git-sha1 ETag, so their content — bounded to
+// 10 MB by the Hub's own regular-file limit — is buffered, hashed, and
+// verified against the git OID, and the manifest entry is rewritten to the
+// sha256 key before storing.
+func (r *Relay) fetchBlob(ctx context.Context, bk backend.Backend, kind hfapi.RepoKind, repo hfapi.RepoID, m *backend.Manifest, entry *backend.FileEntry, callerToken string) error {
 	key := string(kind) + ":" + repo.String() + ":" + entry.Digest.String()
 	_, err, _ := r.blobSF.Do(key, func() (any, error) {
 		start := time.Now()
-		body, meta, err := r.upstream.OpenFile(ctx, kind, repo, commitSHA, entry.Path, callerToken)
+		body, meta, err := r.upstream.OpenFile(ctx, kind, repo, m.CommitSHA, entry.Path, callerToken)
 		if err != nil {
 			r.countPullThrough("blob", "error")
 			return nil, mapUpstreamErr(err)
@@ -286,7 +299,13 @@ func (r *Relay) fetchBlob(ctx context.Context, bk backend.Backend, kind hfapi.Re
 		if meta.Size > 0 {
 			size = meta.Size
 		}
-		if err := bk.PutBlob(ctx, kind, repo, entry.Digest, body, size); err != nil {
+
+		if entry.Digest.Algo() == "sha1" {
+			if err := r.storeRegularBlob(ctx, bk, kind, repo, m, entry, body); err != nil {
+				r.countPullThrough("blob", "error")
+				return nil, err
+			}
+		} else if err := bk.PutBlob(ctx, kind, repo, entry.Digest, body, size); err != nil {
 			r.countPullThrough("blob", "error")
 			return nil, fmt.Errorf("relay: persisting blob %s to %s: %w", entry.Digest, bk.Name(), err)
 		}
@@ -300,6 +319,37 @@ func (r *Relay) fetchBlob(ctx context.Context, bk backend.Backend, kind hfapi.Re
 		return nil, nil
 	})
 	return err
+}
+
+// maxRegularFileSize is the Hub's hard cap on non-LFS files; anything
+// larger is guaranteed to be LFS (sha256-addressed) upstream.
+const maxRegularFileSize = 10 << 20
+
+// storeRegularBlob buffers a git-sha1-addressed regular file, verifies the
+// git OID, and re-keys the manifest entry to the content sha256.
+func (r *Relay) storeRegularBlob(ctx context.Context, bk backend.Backend, kind hfapi.RepoKind, repo hfapi.RepoID, m *backend.Manifest, entry *backend.FileEntry, body io.Reader) error {
+	content, err := io.ReadAll(io.LimitReader(body, maxRegularFileSize+1))
+	if err != nil {
+		return fmt.Errorf("relay: reading regular file %s: %w", entry.Path, err)
+	}
+	if len(content) > maxRegularFileSize {
+		return fmt.Errorf("relay: regular file %s exceeds the %d byte non-LFS limit", entry.Path, maxRegularFileSize)
+	}
+	if oid := gitBlobOID(content); oid != entry.Digest.Hex() {
+		return fmt.Errorf("%w: regular file %s: got git oid %s, want %s", backend.ErrDigestMismatch, entry.Path, oid, entry.Digest.Hex())
+	}
+	sum := sha256.Sum256(content)
+	digest := backend.SHA256Digest(hex.EncodeToString(sum[:]))
+	if err := bk.PutBlob(ctx, kind, repo, digest, bytes.NewReader(content), int64(len(content))); err != nil {
+		return fmt.Errorf("relay: persisting blob %s to %s: %w", digest, bk.Name(), err)
+	}
+	entry.OID = entry.Digest.Hex()
+	entry.Digest = digest
+	entry.Size = int64(len(content))
+	if err := bk.PutManifest(ctx, m, nil); err != nil {
+		return fmt.Errorf("relay: persisting re-keyed manifest: %w", err)
+	}
+	return nil
 }
 
 // Ping checks every routed backend, and upstream when configured.

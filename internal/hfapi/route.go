@@ -8,11 +8,19 @@ import (
 // RouteKind names an HF API endpoint shape.
 type RouteKind string
 
-// The endpoint shapes of the read API.
+// The endpoint shapes of the read and write APIs.
 const (
-	RouteRepoInfo RouteKind = "repo_info"
-	RouteTree     RouteKind = "tree"
-	RouteResolve  RouteKind = "resolve"
+	RouteRepoInfo  RouteKind = "repo_info"
+	RouteTree      RouteKind = "tree"
+	RouteResolve   RouteKind = "resolve"
+	RoutePreupload RouteKind = "preupload"
+	RouteCommit    RouteKind = "commit"
+	RouteLFSBatch  RouteKind = "lfs_batch"
+	// RouteXetToken covers /xet-read-token/{rev} and /xet-write-token/{rev},
+	// recognized so the not-supported answer is deliberate and actionable
+	// (huggingface_hub >= 1.x requests them by default when hf_xet is
+	// installed).
+	RouteXetToken RouteKind = "xet_token"
 )
 
 // Route is a parsed HF API path.
@@ -33,8 +41,11 @@ type Route struct {
 //	/api/{models|datasets}/{id}                     repo info @ default
 //	/api/{models|datasets}/{id}/revision/{rev}      repo info @ rev
 //	/api/{models|datasets}/{id}/tree/{rev}[/{path}] tree listing
+//	/api/{models|datasets}/{id}/preupload/{rev}     upload negotiation
+//	/api/{models|datasets}/{id}/commit/{rev}        NDJSON commit
 //	/{id}/resolve/{rev}/{path}                      file resolve (models)
 //	/datasets/{id}/resolve/{rev}/{path}             file resolve (datasets)
+//	/{id}.git/info/lfs/objects/batch                git-lfs batch API
 //
 // where {id} is one or two segments ("gpt2" or "org/name"). Escaping
 // matters: a revision like "refs%2Fpr%2F1" is one segment whose decoded
@@ -90,7 +101,7 @@ func parseAPIRoute(segs []string) (Route, bool) {
 			return Route{Kind: RouteRepoInfo, RepoKind: kind, Repo: repo}, true
 		}
 		switch segs[idLen] {
-		case "revision":
+		case "revision", "preupload", "commit", "xet-read-token", "xet-write-token":
 			if len(segs) != idLen+2 {
 				return Route{}, false
 			}
@@ -98,7 +109,14 @@ func parseAPIRoute(segs []string) (Route, bool) {
 			if err != nil {
 				return Route{}, false
 			}
-			return Route{Kind: RouteRepoInfo, RepoKind: kind, Repo: repo, Revision: segs[idLen+1]}, true
+			routeKind := map[string]RouteKind{
+				"revision":        RouteRepoInfo,
+				"preupload":       RoutePreupload,
+				"commit":          RouteCommit,
+				"xet-read-token":  RouteXetToken,
+				"xet-write-token": RouteXetToken,
+			}[segs[idLen]]
+			return Route{Kind: routeKind, RepoKind: kind, Repo: repo, Revision: segs[idLen+1]}, true
 		case "tree":
 			if len(segs) < idLen+2 {
 				return Route{}, false
@@ -120,6 +138,9 @@ func parseAPIRoute(segs []string) (Route, bool) {
 }
 
 func parseResolveRoute(kind RepoKind, segs []string) (Route, bool) {
+	if route, ok := parseLFSBatchRoute(kind, segs); ok {
+		return route, true
+	}
 	for _, idLen := range []int{1, 2} {
 		if len(segs) < idLen+3 {
 			return Route{}, false
@@ -137,6 +158,30 @@ func parseResolveRoute(kind RepoKind, segs []string) (Route, bool) {
 				Path:     strings.Join(segs[idLen+2:], "/"),
 			}, true
 		}
+	}
+	return Route{}, false
+}
+
+// parseLFSBatchRoute matches /{id}.git/info/lfs/objects/batch, where the
+// ".git" suffix rides on the repo name's last segment.
+func parseLFSBatchRoute(kind RepoKind, segs []string) (Route, bool) {
+	for _, idLen := range []int{1, 2} {
+		if len(segs) != idLen+4 {
+			continue
+		}
+		if segs[idLen] != "info" || segs[idLen+1] != "lfs" || segs[idLen+2] != "objects" || segs[idLen+3] != "batch" {
+			continue
+		}
+		last := segs[idLen-1]
+		if !strings.HasSuffix(last, ".git") {
+			continue
+		}
+		id := strings.Join(append(append([]string{}, segs[:idLen-1]...), strings.TrimSuffix(last, ".git")), "/")
+		repo, err := ParseRepoID(id)
+		if err != nil {
+			return Route{}, false
+		}
+		return Route{Kind: RouteLFSBatch, RepoKind: kind, Repo: repo}, true
 	}
 	return Route{}, false
 }

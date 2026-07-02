@@ -60,7 +60,7 @@ Today the bridge between these planes is ad hoc: shell scripts, MatrixHub-style 
 - Preupload: `POST /api/models/{repo}/preupload/{rev}` — decide per-file: inline vs LFS vs Xet
 - LFS batch API + S3-style multipart upload endpoints (what `huggingface_hub` falls back to when Xet is unavailable)
 - Repo management: create/delete repo, branch/tag create, move
-- `huggingface_hub` gracefully degrades to the LFS path when the endpoint doesn't advertise Xet — **v1 ships LFS-complete, Xet-advertising-off**, which already makes every client work.
+- **v1 ships LFS-complete, Xet-advertising-off.** Reads degrade gracefully in every `huggingface_hub` version (no `X-Xet-*` headers → plain HTTP path). Writes: `huggingface_hub` 0.x degrades to LFS automatically, but **1.x bundles `hf_xet` and uploads via Xet with no LFS fallback** — it requests `/api/{type}s/{repo}/xet-write-token/{rev}` unconditionally. Until Xet write lands (M4), hub-1.x users must set `HF_HUB_DISABLE_XET=1` to push; Shpiel answers the xet-token endpoints with a 404 that says exactly that. This moves Xet from "differentiator" to compat-critical for the write path.
 
 **Xet (v1.x, the differentiator):**
 - The Xet protocol is publicly specified (chunking via gearhash CDC, chunk/xorb/shard hashing, xorb format, CAS HTTP API, reconstruction API, token issuance). Clients are open source (`xet-core`, `hf_xet`); the server is not — Shpiel becomes the first OSS Xet-speaking server.

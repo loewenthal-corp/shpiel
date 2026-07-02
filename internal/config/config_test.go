@@ -85,6 +85,15 @@ func TestUnknownKeysRejected(t *testing.T) {
 	}
 }
 
+func TestMultiDocumentRejected(t *testing.T) {
+	t.Parallel()
+	// A stray --- would silently discard everything after it.
+	_, err := Load(writeTemp(t, "listen:\n  api: ':1'\n---\nupstream:\n  huggingface:\n    pull_through: true\n"))
+	if err == nil || !strings.Contains(err.Error(), "multiple YAML documents") {
+		t.Fatalf("multi-document config must fail loudly, got %v", err)
+	}
+}
+
 func TestValidateCatchesMistakes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

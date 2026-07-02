@@ -32,6 +32,19 @@ func TestParseRoute(t *testing.T) {
 		{"/api/datasets/org/name", Route{Kind: RouteRepoInfo, RepoKind: RepoKindDataset, Repo: RepoID{Owner: "org", Name: "name"}}, true},
 		{"/datasets/org/name/resolve/main/data.parquet", Route{Kind: RouteResolve, RepoKind: RepoKindDataset, Repo: RepoID{Owner: "org", Name: "name"}, Revision: "main", Path: "data.parquet"}, true},
 
+		// Write path.
+		{"/api/models/org/name/preupload/main", Route{Kind: RoutePreupload, RepoKind: RepoKindModel, Repo: RepoID{Owner: "org", Name: "name"}, Revision: "main"}, true},
+		{"/api/models/gpt2/preupload/main", Route{Kind: RoutePreupload, RepoKind: RepoKindModel, Repo: RepoID{Name: "gpt2"}, Revision: "main"}, true},
+		{"/api/models/org/name/commit/main", Route{Kind: RouteCommit, RepoKind: RepoKindModel, Repo: RepoID{Owner: "org", Name: "name"}, Revision: "main"}, true},
+		{"/api/models/org/name/commit/refs%2Fpr%2F1", Route{Kind: RouteCommit, RepoKind: RepoKindModel, Repo: RepoID{Owner: "org", Name: "name"}, Revision: "refs/pr/1"}, true},
+		{"/org/name.git/info/lfs/objects/batch", Route{Kind: RouteLFSBatch, RepoKind: RepoKindModel, Repo: RepoID{Owner: "org", Name: "name"}}, true},
+		{"/gpt2.git/info/lfs/objects/batch", Route{Kind: RouteLFSBatch, RepoKind: RepoKindModel, Repo: RepoID{Name: "gpt2"}}, true},
+		{"/datasets/org/name.git/info/lfs/objects/batch", Route{Kind: RouteLFSBatch, RepoKind: RepoKindDataset, Repo: RepoID{Owner: "org", Name: "name"}}, true},
+		{"/org/name/info/lfs/objects/batch", Route{}, false}, // no .git suffix
+		{"/org/name.git/info/lfs/objects", Route{}, false},   // truncated
+		{"/api/models/org/name/preupload", Route{}, false},   // missing revision
+		{"/api/models/org/name/commit/main/extra", Route{}, false},
+
 		// Non-routes.
 		{"/", Route{}, false},
 		{"/api", Route{}, false},

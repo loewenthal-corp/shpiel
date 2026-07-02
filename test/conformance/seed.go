@@ -32,16 +32,17 @@ func SeedBackend(bk backend.Backend, fx Fixture) (Fixture, error) {
 		CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	for path, f := range fx.Files {
-		entry := backend.FileEntry{Path: path, Size: int64(len(f.Content))}
+		// Storage keys are always the content sha256 (the relay's
+		// invariant); the git OID rides along as the regular-file ETag.
+		entry := backend.FileEntry{
+			Path:   path,
+			Size:   int64(len(f.Content)),
+			Digest: backend.SHA256Digest(fakehub.SHA256Hex(f.Content)),
+			OID:    fakehub.GitBlobOID(f.Content),
+		}
 		if f.LFS {
 			sha := fakehub.SHA256Hex(f.Content)
-			entry.Digest = backend.SHA256Digest(sha)
-			entry.OID = fakehub.GitBlobOID(f.Content) // pointer-ish oid; presence is what matters
 			entry.LFS = &hfapi.LFSInfo{SHA256: sha, OID: sha, Size: entry.Size, PointerSize: 134}
-		} else {
-			oid := fakehub.GitBlobOID(f.Content)
-			entry.Digest = backend.SHA1Digest(oid)
-			entry.OID = oid
 		}
 		m.Files = append(m.Files, entry)
 	}

@@ -49,42 +49,13 @@ func TestRealHFClientAgainstShpiel(t *testing.T) {
 	defer hubSrv.Close()
 
 	// --- Build and start the real shpiel binary ---
-	bin := buildShpiel(t, repoRoot)
-	apiPort, metricsPort := freePort(t), freePort(t)
-	dataDir := t.TempDir()
-	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	writeFile(t, cfgPath, fmt.Sprintf(`---
-listen:
-  api: "0.0.0.0:%d"
-  metrics: "127.0.0.1:%d"
-upstream:
+	sh := startShpiel(t, repoRoot, fmt.Sprintf(`upstream:
   huggingface:
     endpoint: %s
     pull_through: true
     refresh_interval: 1m
-backends:
-  cache:
-    type: fs
-    path: %s
-routes:
-  - match: "*"
-    primary: cache
-log:
-  level: debug
-  format: text
-`, apiPort, metricsPort, hubSrv.URL, dataDir))
-
-	shpiel := exec.Command(bin, "serve", "--config", cfgPath)
-	shpiel.Stdout = testWriter{t, "shpiel"}
-	shpiel.Stderr = testWriter{t, "shpiel"}
-	if err := shpiel.Start(); err != nil {
-		t.Fatalf("starting shpiel: %v", err)
-	}
-	defer func() {
-		_ = shpiel.Process.Kill()
-		_ = shpiel.Wait()
-	}()
-	waitReady(t, fmt.Sprintf("http://127.0.0.1:%d/readyz", apiPort))
+`, hubSrv.URL))
+	apiPort, metricsPort := sh.apiPort, sh.metricsPort
 
 	// --- Run the real HF client in Docker ---
 	buildClientImage(t, repoRoot)
@@ -141,7 +112,91 @@ log:
 	}
 }
 
+// TestRealHFClientUploadToShpiel proves the M1 write-path exit shape:
+// unmodified huggingface_hub create_repo / upload_folder / delete_file and
+// the hf CLI push a model into Shpiel, and every byte reads back.
+func TestRealHFClientUploadToShpiel(t *testing.T) {
+	requireDocker(t)
+	repoRoot := repoRoot(t)
+
+	// No upstream: the write path stands alone (air-gapped shape).
+	sh := startShpiel(t, repoRoot, "")
+	buildClientImage(t, repoRoot)
+
+	out := runClient(t, repoRoot, []string{
+		"-e", fmt.Sprintf("HF_ENDPOINT=http://host.docker.internal:%d", sh.apiPort),
+		"-e", "E2E_REPO=fixtures/uploaded-model",
+		"-e", "HF_HUB_DISABLE_TELEMETRY=1",
+		// huggingface_hub >= 1.x uploads through Xet by default (hf_xet is
+		// bundled) with no LFS fallback; until Shpiel implements Xet write
+		// (spec M4), hub-1.x researchers must set this. Downloads need no
+		// such flag — the read path degrades cleanly.
+		"-e", "HF_HUB_DISABLE_XET=1",
+	}, "/client/upload.py")
+	if !strings.Contains(out, "E2E_UPLOAD_OK") {
+		t.Fatalf("upload verification did not reach E2E_UPLOAD_OK:\n%s", out)
+	}
+
+	// Observability: commits were counted.
+	metrics := httpGetBody(t, fmt.Sprintf("http://127.0.0.1:%d/metrics", sh.metricsPort))
+	if !strings.Contains(metrics, `shpiel_commits_total{outcome="ok"}`) {
+		t.Error("metrics missing shpiel_commits_total")
+	}
+}
+
 // --- helpers ---
+
+// shpielProc is a running shpiel binary under test.
+type shpielProc struct {
+	apiPort     int
+	metricsPort int
+}
+
+// startShpiel builds the real binary and serves it with an FS backend in a
+// temp dir. extraConfig is appended YAML (e.g. an upstream block).
+func startShpiel(t *testing.T, repoRoot, extraConfig string) *shpielProc {
+	t.Helper()
+	return startShpielWithConfig(t, repoRoot, func(apiPort, metricsPort int) string {
+		return fmt.Sprintf(`---
+listen:
+  api: "0.0.0.0:%d"
+  metrics: "127.0.0.1:%d"
+backends:
+  cache:
+    type: fs
+    path: %s
+routes:
+  - match: "*"
+    primary: cache
+log:
+  level: debug
+  format: text
+%s`, apiPort, metricsPort, t.TempDir(), extraConfig)
+	})
+}
+
+// startShpielWithConfig builds the binary and serves it with a caller-built
+// config (ports are allocated first and handed to the builder).
+func startShpielWithConfig(t *testing.T, repoRoot string, buildCfg func(apiPort, metricsPort int) string) *shpielProc {
+	t.Helper()
+	bin := buildShpiel(t, repoRoot)
+	apiPort, metricsPort := freePort(t), freePort(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	writeFile(t, cfgPath, buildCfg(apiPort, metricsPort))
+
+	shpiel := exec.Command(bin, "serve", "--config", cfgPath)
+	shpiel.Stdout = testWriter{t, "shpiel"}
+	shpiel.Stderr = testWriter{t, "shpiel"}
+	if err := shpiel.Start(); err != nil {
+		t.Fatalf("starting shpiel: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = shpiel.Process.Kill()
+		_ = shpiel.Wait()
+	})
+	waitReady(t, fmt.Sprintf("http://127.0.0.1:%d/readyz", apiPort))
+	return &shpielProc{apiPort: apiPort, metricsPort: metricsPort}
+}
 
 func requireDocker(t *testing.T) {
 	t.Helper()

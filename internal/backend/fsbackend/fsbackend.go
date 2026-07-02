@@ -75,6 +75,34 @@ func (b *Backend) manifestPath(kind hfapi.RepoKind, repo hfapi.RepoID, commitSHA
 	return filepath.Join(b.root, ".shpiel", repoDirName(kind, repo), "manifests", commitSHA+".json")
 }
 
+// CreateRepo implements backend.Backend by materializing the repo's
+// directory skeleton (refs/, blobs/, snapshots/ appear lazily).
+func (b *Backend) CreateRepo(ctx context.Context, kind hfapi.RepoKind, repo hfapi.RepoID) error {
+	repoDir := b.repoDir(kind, repo)
+	if _, err := os.Stat(repoDir); err == nil {
+		return backend.ErrRepoExists
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, "refs"), 0o755); err != nil {
+		return fmt.Errorf("fsbackend: creating repo: %w", err)
+	}
+	return nil
+}
+
+// DeleteRepo implements backend.Backend, removing content and metadata.
+func (b *Backend) DeleteRepo(ctx context.Context, kind hfapi.RepoKind, repo hfapi.RepoID) error {
+	repoDir := b.repoDir(kind, repo)
+	if _, err := os.Stat(repoDir); err != nil {
+		return backend.ErrRepoNotFound
+	}
+	if err := os.RemoveAll(repoDir); err != nil {
+		return fmt.Errorf("fsbackend: deleting repo: %w", err)
+	}
+	if err := os.RemoveAll(filepath.Join(b.root, ".shpiel", repoDirName(kind, repo))); err != nil {
+		return fmt.Errorf("fsbackend: deleting repo metadata: %w", err)
+	}
+	return nil
+}
+
 // ResolveRef implements backend.Backend.
 func (b *Backend) ResolveRef(ctx context.Context, kind hfapi.RepoKind, repo hfapi.RepoID, ref string) (string, error) {
 	repoDir := b.repoDir(kind, repo)

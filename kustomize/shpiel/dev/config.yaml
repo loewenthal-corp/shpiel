@@ -1,5 +1,7 @@
 # Dev-cluster shpiel config: pull-through from the in-cluster fakehub so
-# the whole environment is hermetic (no public internet).
+# the whole environment is hermetic (no public internet), landing weights
+# in the in-cluster Zot as mountable tar-layer OCI artifacts — the
+# flagship Spegel-ready deployment shape.
 ---
 listen:
   api: ":8080"
@@ -12,13 +14,14 @@ upstream:
     refresh_interval: 1m
 
 backends:
-  cache:
-    type: fs
-    path: /var/lib/shpiel
+  zot:
+    type: oci
+    url: http://zot.shpiel-dev.svc.cluster.local:5000
+    format: tar-layers
 
 routes:
   - match: "*"
-    primary: cache
+    primary: zot
 
 auth:
   mode: none

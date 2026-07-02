@@ -18,6 +18,7 @@ import (
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
 	"github.com/loewenthal-corp/shpiel/internal/metrics"
 	"github.com/loewenthal-corp/shpiel/internal/relay"
+	"github.com/loewenthal-corp/shpiel/internal/upstream"
 )
 
 // Server hosts the HF API listener and the optional metrics listener.
@@ -27,22 +28,38 @@ type Server struct {
 	metrics *metrics.Metrics
 	log     *slog.Logger
 
-	// downloadSem bounds concurrent content downloads
-	// (limits.max_concurrent_downloads); nil means unlimited.
+	// upstream is used for whoami proxying and passthrough token
+	// validation; it is set even when pull-through is disabled.
+	upstream *upstream.Client
+	tokens   *tokenValidator
+
+	// downloadSem / uploadSem bound concurrent content transfers
+	// (limits.max_concurrent_*); nil means unlimited.
 	downloadSem chan struct{}
+	uploadSem   chan struct{}
 
 	apiListener     net.Listener
 	metricsListener net.Listener
 }
 
-// New assembles a Server.
-func New(cfg config.Config, rl *relay.Relay, m *metrics.Metrics, log *slog.Logger) *Server {
+// New assembles a Server. up may be nil (no upstream configured).
+func New(cfg config.Config, rl *relay.Relay, up *upstream.Client, m *metrics.Metrics, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Server{cfg: cfg, relay: rl, metrics: m, log: log}
+	s := &Server{
+		cfg:      cfg,
+		relay:    rl,
+		metrics:  m,
+		log:      log,
+		upstream: up,
+		tokens:   newTokenValidator(cfg.Auth.CacheTTL),
+	}
 	if n := cfg.Limits.MaxConcurrentDownloads; n > 0 {
 		s.downloadSem = make(chan struct{}, n)
+	}
+	if n := cfg.Limits.MaxConcurrentUploads; n > 0 {
+		s.uploadSem = make(chan struct{}, n)
 	}
 	return s
 }
@@ -50,20 +67,34 @@ func New(cfg config.Config, rl *relay.Relay, m *metrics.Metrics, log *slog.Logge
 // acquireDownloadSlot blocks until a download slot frees up or the request
 // is canceled.
 func (s *Server) acquireDownloadSlot(ctx context.Context) error {
-	if s.downloadSem == nil {
+	return acquireSlot(ctx, s.downloadSem)
+}
+
+func (s *Server) releaseDownloadSlot() { releaseSlot(s.downloadSem) }
+
+// acquireUploadSlot blocks until an upload slot frees up or the request is
+// canceled.
+func (s *Server) acquireUploadSlot(ctx context.Context) error {
+	return acquireSlot(ctx, s.uploadSem)
+}
+
+func (s *Server) releaseUploadSlot() { releaseSlot(s.uploadSem) }
+
+func acquireSlot(ctx context.Context, sem chan struct{}) error {
+	if sem == nil {
 		return nil
 	}
 	select {
-	case s.downloadSem <- struct{}{}:
+	case sem <- struct{}{}:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func (s *Server) releaseDownloadSlot() {
-	if s.downloadSem != nil {
-		<-s.downloadSem
+func releaseSlot(sem chan struct{}) {
+	if sem != nil {
+		<-sem
 	}
 }
 
@@ -78,6 +109,12 @@ func (s *Server) releaseDownloadSlot() {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/whoami-v2", s.instrument("whoami", s.handleWhoAmI))
+	mux.HandleFunc("POST /api/repos/create", s.instrument("repo_create", s.handleCreateRepo))
+	mux.HandleFunc("DELETE /api/repos/delete", s.instrument("repo_delete", s.handleDeleteRepo))
+	// The LFS upload href minted by the batch API; "shpiel-lfs" is a
+	// reserved first segment (not a valid place for a repo owner clash to
+	// matter: hrefs are always server-generated).
+	mux.HandleFunc("PUT /shpiel-lfs/{kind}/{rest...}", s.instrument("lfs_upload", s.handleLFSUpload))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
 	mux.HandleFunc("GET /{$}", s.instrument("root", s.handleRoot))
@@ -108,6 +145,20 @@ func (s *Server) dispatchHF(w http.ResponseWriter, r *http.Request) {
 		s.instrument("tree", s.withRoute(route, s.handleTree))(w, r)
 	case route.Kind == hfapi.RouteResolve && (r.Method == http.MethodGet || r.Method == http.MethodHead):
 		s.instrument("resolve", s.withRoute(route, s.handleResolve))(w, r)
+	case route.Kind == hfapi.RoutePreupload && r.Method == http.MethodPost:
+		s.instrument("preupload", s.withRoute(route, s.handlePreupload))(w, r)
+	case route.Kind == hfapi.RouteCommit && r.Method == http.MethodPost:
+		s.instrument("commit", s.withRoute(route, s.handleCommit))(w, r)
+	case route.Kind == hfapi.RouteLFSBatch && r.Method == http.MethodPost:
+		s.instrument("lfs_batch", s.withRoute(route, s.handleLFSBatch))(w, r)
+	case route.Kind == hfapi.RouteXetToken:
+		s.instrument("xet_token", func(w http.ResponseWriter, r *http.Request) {
+			// huggingface_hub >= 1.x uploads via Xet by default and does
+			// not fall back to LFS on failure; until Shpiel ships Xet
+			// support (spec M3/M4), clients must disable it explicitly.
+			writeHFError(w, http.StatusNotFound, "",
+				"Xet is not supported by this endpoint yet. Set HF_HUB_DISABLE_XET=1 to upload via LFS.")
+		})(w, r)
 	default:
 		s.instrument("unknown", func(w http.ResponseWriter, r *http.Request) {
 			writeHFError(w, http.StatusMethodNotAllowed, "", "Method not allowed.")

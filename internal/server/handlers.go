@@ -39,7 +39,7 @@ func (s *Server) handleModelInfo(w http.ResponseWriter, r *http.Request) {
 	route := routeFrom(r)
 	m, err := s.relay.ResolveManifest(r.Context(), route.RepoKind, route.Repo, revision(route), bearerToken(r))
 	if err != nil {
-		writeRelayError(w, err)
+		s.writeError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, modelInfoFromManifest(m))
@@ -85,7 +85,7 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 	route := routeFrom(r)
 	m, err := s.relay.ResolveManifest(r.Context(), route.RepoKind, route.Repo, revision(route), bearerToken(r))
 	if err != nil {
-		writeRelayError(w, err)
+		s.writeError(w, r, err)
 		return
 	}
 
@@ -199,12 +199,12 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 
 	m, err := s.relay.ResolveManifest(r.Context(), route.RepoKind, route.Repo, revision(route), token)
 	if err != nil {
-		writeRelayError(w, err)
+		s.writeError(w, r, err)
 		return
 	}
 	entry, err := s.relay.EnsureEntry(r.Context(), route.RepoKind, route.Repo, m, filePath, token)
 	if err != nil {
-		writeRelayError(w, err)
+		s.writeError(w, r, err)
 		return
 	}
 
@@ -235,7 +235,7 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 
 	content, err := s.relay.OpenFile(r.Context(), route.RepoKind, route.Repo, m, filePath, token)
 	if err != nil {
-		writeRelayError(w, err)
+		s.writeError(w, r, err)
 		return
 	}
 	defer content.Close()
@@ -269,13 +269,13 @@ func contentTypeFor(p string) string {
 // proxied verbatim so upstream token semantics are preserved; otherwise a
 // synthetic local identity is returned.
 func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Auth.Mode == "passthrough" && s.relay.Upstream() != nil {
+	if s.cfg.Auth.Mode == "passthrough" && s.upstream != nil {
 		token := bearerToken(r)
 		if token == "" {
 			writeHFError(w, http.StatusUnauthorized, "", "Invalid credentials in Authorization header")
 			return
 		}
-		status, body, err := s.relay.Upstream().WhoAmI(r.Context(), token)
+		status, body, err := s.upstream.WhoAmI(r.Context(), token)
 		if err != nil {
 			writeHFError(w, http.StatusBadGateway, "", "Upstream whoami failed.")
 			return

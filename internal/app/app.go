@@ -11,6 +11,7 @@ import (
 
 	"github.com/loewenthal-corp/shpiel/internal/backend"
 	"github.com/loewenthal-corp/shpiel/internal/backend/fsbackend"
+	"github.com/loewenthal-corp/shpiel/internal/backend/ocibackend"
 	"github.com/loewenthal-corp/shpiel/internal/config"
 	"github.com/loewenthal-corp/shpiel/internal/metrics"
 	"github.com/loewenthal-corp/shpiel/internal/relay"
@@ -48,6 +49,18 @@ func Build(cfg config.Config) (*App, error) {
 				return nil, fmt.Errorf("backend %q: %w", name, err)
 			}
 			backends[name] = b
+		case "oci":
+			b, err := ocibackend.New(name, ocibackend.Options{
+				URL:        bc.URL,
+				Format:     bc.Format,
+				RepoPrefix: bc.RepoPrefix,
+				Username:   os.Getenv(bc.Auth.UsernameEnv),
+				Password:   os.Getenv(bc.Auth.PasswordEnv),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("backend %q: %w", name, err)
+			}
+			backends[name] = b
 		default:
 			// Validate() already rejects these; belt and suspenders.
 			return nil, fmt.Errorf("backend %q: unsupported type %q", name, bc.Type)
@@ -59,15 +72,22 @@ func Build(cfg config.Config) (*App, error) {
 		return nil, err
 	}
 
+	// The upstream client exists whenever an endpoint is configured: the
+	// relay uses it only when pull-through is on, while the server needs
+	// it for whoami proxying and passthrough token validation regardless.
 	var up *upstream.Client
-	if cfg.Upstream.HuggingFace.PullThrough {
+	if cfg.Upstream.HuggingFace.Endpoint != "" {
 		up = upstream.New(cfg.Upstream.HuggingFace.Endpoint, cfg.Upstream.HuggingFace.Token())
+	}
+	pullThrough := up
+	if !cfg.Upstream.HuggingFace.PullThrough {
+		pullThrough = nil
 	}
 
 	m := metrics.New()
 	rl := relay.New(relay.Options{
 		Router:          router,
-		Upstream:        up,
+		Upstream:        pullThrough,
 		RefreshInterval: cfg.Upstream.HuggingFace.RefreshInterval,
 		Metrics:         m,
 		Log:             log,
@@ -75,7 +95,7 @@ func Build(cfg config.Config) (*App, error) {
 
 	return &App{
 		Config:  cfg,
-		Server:  server.New(cfg, rl, m, log),
+		Server:  server.New(cfg, rl, up, m, log),
 		Relay:   rl,
 		Metrics: m,
 		Log:     log,

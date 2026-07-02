@@ -29,13 +29,19 @@ upstream:
     refresh_interval: 5m
 
 backends:
-  # Coming in M1 — oci (Zot/Harbor/GHCR) and s3 backends:
+  # OCI registry backend (Zot, Harbor, GHCR, ...): one OCI repository per
+  # model, one manifest per commit (tagged by SHA), refs as tags, one
+  # layer per file.
   #   zot:
   #     type: oci
   #     url: https://zot.internal:5000
-  #     format: modelpack          # or: tar-layers (image-volume-safe)
-  #     layer_per_file: true
+  #     # modelpack: raw per-file layers, modctl-style (default).
+  #     # tar-layers: standard OCI image with tar layers — mountable via
+  #     # Kubernetes image volumes and P2P-distributable by Spegel.
+  #     format: tar-layers
+  #     repo_prefix: ""            # optional path prefix for OCI repo names
   #     auth: { username_env: ZOT_USER, password_env: ZOT_PASS }
+  # Coming in M1.x:
   #   archive:
   #     type: s3
   #     bucket: models-archive

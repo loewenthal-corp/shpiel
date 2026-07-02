@@ -22,6 +22,7 @@ type Metrics struct {
 	DownloadBytes      *prometheus.CounterVec   // source
 	UploadBytes        *prometheus.CounterVec   // backend
 	PullThroughFetches *prometheus.CounterVec   // kind, outcome
+	Commits            *prometheus.CounterVec   // outcome
 	InflightRequests   prometheus.Gauge
 }
 
@@ -52,6 +53,10 @@ func New() *Metrics {
 			Name: "shpiel_pullthrough_fetches_total",
 			Help: "Pull-through fetches from upstream, by kind (manifest or blob) and outcome.",
 		}, []string{"kind", "outcome"}),
+		Commits: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "shpiel_commits_total",
+			Help: "Commits accepted through the write path, by outcome.",
+		}, []string{"outcome"}),
 		InflightRequests: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "shpiel_http_inflight_requests",
 			Help: "HTTP requests currently being served.",
@@ -59,7 +64,7 @@ func New() *Metrics {
 	}
 	reg.MustRegister(
 		m.HTTPRequests, m.HTTPDuration, m.DownloadBytes, m.UploadBytes,
-		m.PullThroughFetches, m.InflightRequests,
+		m.PullThroughFetches, m.Commits, m.InflightRequests,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)

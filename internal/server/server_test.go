@@ -35,7 +35,7 @@ func newTestServer(t *testing.T, mutate func(*config.Config), up *upstream.Clien
 	}
 	m := metrics.New()
 	rl := relay.New(relay.Options{Router: router, Upstream: up, Metrics: m})
-	srv := httptest.NewServer(New(cfg, rl, m, nil).Handler())
+	srv := httptest.NewServer(New(cfg, rl, up, m, nil).Handler())
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -96,6 +96,66 @@ func TestWhoAmIPassthrough(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "fakeuser") {
 		t.Errorf("whoami body not proxied from upstream: %s", body)
+	}
+}
+
+func TestWriteAuthPassthrough(t *testing.T) {
+	t.Parallel()
+	hub := fakehub.New()
+	hubSrv := httptest.NewServer(hub.Handler())
+	t.Cleanup(hubSrv.Close)
+	up := upstream.New(hubSrv.URL, "")
+
+	srv := newTestServer(t, func(c *config.Config) { c.Auth.Mode = "passthrough" }, up)
+	createBody := `{"name":"org/authed","type":"model"}`
+
+	// Anonymous write: rejected without touching upstream.
+	resp, err := http.Post(srv.URL+"/api/repos/create", "application/json", strings.NewReader(createBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous create = %d, want 401", resp.StatusCode)
+	}
+
+	// Authenticated write: token validated against upstream whoami.
+	post := func() int {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/repos/create", strings.NewReader(createBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer hf_valid")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if status := post(); status != http.StatusOK {
+		t.Fatalf("authed create = %d, want 200", status)
+	}
+	// Second call (409 conflict is fine) must be served from the token
+	// cache: no extra whoami round-trip.
+	before := hub.Requests("GET", "/api/whoami-v2")
+	if status := post(); status != http.StatusConflict {
+		t.Fatalf("second create = %d, want 409", status)
+	}
+	if after := hub.Requests("GET", "/api/whoami-v2"); after != before {
+		t.Errorf("token validation not cached (%d -> %d whoami calls)", before, after)
+	}
+}
+
+func TestWriteOpenWhenAuthNone(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t, nil, nil)
+	resp, err := http.Post(srv.URL+"/api/repos/create", "application/json",
+		strings.NewReader(`{"name":"org/open","type":"model"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create with auth.mode=none = %d, want 200", resp.StatusCode)
 	}
 }
 

@@ -11,14 +11,23 @@ milestones.
 
 ```diagram
 client (hf / vLLM / push_to_hub)
-   │  HF Hub API
+   │  HF Hub API (read + write)
    ▼
 internal/server     HTTP surface; routes parsed by internal/hfapi.ParseRoute
    ▼
-internal/relay      backend-first reads; pull-through on miss (singleflight)
+internal/relay      backend-first reads; pull-through on miss (singleflight);
+   │                commit application + LFS blob intake on writes
    ├── internal/backend/fsbackend    HF-cache-layout store (refs/manifests/blobs)
+   ├── internal/backend/ocibackend   OCI artifacts in Zot/Harbor (modelpack or
+   │      │                          mountable tar-layers; staged→promoted commits)
+   │      └── internal/ociclient     minimal distribution-spec client (ranged
+   │                                 reads, chunked streaming uploads)
    └── internal/upstream             huggingface.co client (pull-through source)
 ```
+
+Storage invariant: blobs are keyed by content sha256 everywhere (the only
+address OCI speaks); git-sha1 OIDs are metadata for ETags. All backends
+accept manifests before blobs (staging) and link/promote as blobs arrive.
 
 - `internal/hfapi` is the wire contract: JSON shapes, headers
   (`X-Repo-Commit`, `X-Linked-Etag`), error codes (`RepoNotFound`, ...).

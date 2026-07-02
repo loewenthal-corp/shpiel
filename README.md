@@ -48,13 +48,21 @@ shpiel serve --config config.yaml
 
 ## Status
 
-Early. M0 (read path) is functional and hard-tested: repo info / tree /
-resolve with Range support, pull-through caching with singleflight
-collapse, token passthrough, Prometheus metrics, structured logs. The
-on-disk store is byte-compatible with the `huggingface_hub` cache, so a
-volume Shpiel fills is directly consumable with `HF_HUB_OFFLINE=1`. Write
-path (commit/preupload/LFS), OCI + S3 backends, and Xet are next — see
-[spec.md](spec.md) §9 for milestones.
+Early but real. **M0 (read path)**: repo info / tree / resolve with Range
+support, pull-through caching with singleflight collapse, token
+passthrough, Prometheus metrics, structured logs. The filesystem store is
+byte-compatible with the `huggingface_hub` cache, so a volume Shpiel fills
+is directly consumable with `HF_HUB_OFFLINE=1`. **M1 (write path + OCI)**:
+`create_repo` / `upload_folder` / `hf upload` work end to end
+(preupload, git-LFS batch with blob-level dedup, NDJSON commits), and the
+OCI backend lands models in Zot/Harbor as either ModelPack-style artifacts
+or image-volume-mountable tar-layer images — commits tagged by SHA, refs
+as tags, one layer per file.
+
+One caveat for pushers: `huggingface_hub` 1.x uploads via Xet by default
+and does not fall back; set `HF_HUB_DISABLE_XET=1` until Shpiel's Xet
+support (M4) lands. Downloads need no flag. S3 backend, fan-out
+replication, Helm chart, and Xet are next — see [spec.md](spec.md) §9.
 
 ## Development
 

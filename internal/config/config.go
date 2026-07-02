@@ -78,11 +78,17 @@ type BackendConfig struct {
 	// fs
 	Path string `yaml:"path,omitempty"`
 
-	// oci (M1)
-	URL          string      `yaml:"url,omitempty"`
-	Format       string      `yaml:"format,omitempty"` // "modelpack" | "tar-layers"
-	LayerPerFile bool        `yaml:"layer_per_file,omitempty"`
-	Auth         BackendAuth `yaml:"auth,omitempty"`
+	// oci
+	URL string `yaml:"url,omitempty"`
+	// Format is "modelpack" (raw per-file layers, default) or
+	// "tar-layers" (image-volume-mountable tars).
+	Format string `yaml:"format,omitempty"`
+	// LayerPerFile is accepted for forward compatibility; v1 always maps
+	// one file to one layer.
+	LayerPerFile bool `yaml:"layer_per_file,omitempty"`
+	// RepoPrefix prepends a path to every OCI repository name.
+	RepoPrefix string      `yaml:"repo_prefix,omitempty"`
+	Auth       BackendAuth `yaml:"auth,omitempty"`
 
 	// s3 (M1+)
 	Bucket string `yaml:"bucket,omitempty"`
@@ -185,6 +191,12 @@ func Load(path string) (Config, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return cfg, fmt.Errorf("config: parsing %s: %w", path, err)
 	}
+	// A stray "---" mid-file starts a second YAML document that would
+	// otherwise be ignored silently — everything after it dropped. Refuse.
+	var extra any
+	if err := dec.Decode(&extra); err == nil {
+		return cfg, fmt.Errorf("config: %s contains multiple YAML documents; remove the stray --- separator", path)
+	}
 	return cfg, nil
 }
 
@@ -213,7 +225,16 @@ func (c *Config) Validate() error {
 			if b.Path == "" {
 				errs = append(errs, fmt.Errorf("backend %q: fs backend requires path", name))
 			}
-		case "oci", "s3", "huggingface":
+		case "oci":
+			if b.URL == "" {
+				errs = append(errs, fmt.Errorf("backend %q: oci backend requires url", name))
+			}
+			switch b.Format {
+			case "", "modelpack", "tar-layers":
+			default:
+				errs = append(errs, fmt.Errorf("backend %q: unknown oci format %q (want modelpack|tar-layers)", name, b.Format))
+			}
+		case "s3", "huggingface":
 			errs = append(errs, fmt.Errorf("backend %q: type %q is not implemented yet", name, b.Type))
 		default:
 			errs = append(errs, fmt.Errorf("backend %q: unknown type %q", name, b.Type))

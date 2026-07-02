@@ -17,6 +17,7 @@ import (
 // error codes (RepoNotFound, RevisionNotFound, EntryNotFound).
 var (
 	ErrRepoNotFound     = errors.New("repo not found")
+	ErrRepoExists       = errors.New("repo already exists")
 	ErrRevisionNotFound = errors.New("revision not found")
 	ErrBlobNotFound     = errors.New("blob not found")
 	ErrDigestMismatch   = errors.New("blob digest mismatch")
@@ -65,8 +66,15 @@ type FileEntry struct {
 }
 
 // ETag returns the ETag value (unquoted) the HF contract expects for this
-// file: the sha256 for LFS files, the git blob OID otherwise.
+// file: the content sha256 for LFS files, the git blob OID otherwise.
+// Falls back to the storage digest when no OID was recorded.
 func (f *FileEntry) ETag() string {
+	if f.LFS != nil && f.LFS.SHA256 != "" {
+		return f.LFS.SHA256
+	}
+	if f.OID != "" {
+		return f.OID
+	}
 	return f.Digest.Hex()
 }
 
@@ -83,6 +91,14 @@ type BlobInfo struct {
 type Backend interface {
 	// Name identifies the backend instance (the key from the config file).
 	Name() string
+
+	// CreateRepo initializes an empty repo. Returns ErrRepoExists if it is
+	// already there.
+	CreateRepo(ctx context.Context, kind hfapi.RepoKind, repo hfapi.RepoID) error
+
+	// DeleteRepo removes a repo and all its data. Returns ErrRepoNotFound
+	// if it does not exist.
+	DeleteRepo(ctx context.Context, kind hfapi.RepoKind, repo hfapi.RepoID) error
 
 	// ResolveRef maps a ref (branch, tag) or commit SHA to a commit SHA.
 	// Returns ErrRepoNotFound if the repo is unknown, ErrRevisionNotFound
