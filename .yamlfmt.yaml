@@ -4,9 +4,6 @@ continue_on_error: true
 regex_exclude:
   - '# yamlfmt: ignore'
 
-# exclude:
-#   - "example.yaml"
-
 formatter:
   type: basic
   include_document_start: true

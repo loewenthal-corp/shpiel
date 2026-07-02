@@ -55,10 +55,12 @@ tasks:
       - task: format:yaml
 
   format:yaml:
-    desc: "Run the yamlfmt formatter on all yaml files"
+    desc: "Run the yamlfmt formatter on all yaml files (charts/ is Helm's)"
     dir: "{{.TASKFILE_DIR}}"
     cmds:
-      - yamlfmt .
+      # charts/ is excluded: templates are not valid YAML, and
+      # release-please rewrites Chart.yaml in its own style every release.
+      - git ls-files -co --exclude-standard '*.yaml' '*.yml' ':!charts' | xargs yamlfmt
 
   lint:
     desc: "Lint the codebase"
