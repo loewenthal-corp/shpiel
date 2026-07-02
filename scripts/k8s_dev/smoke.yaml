@@ -1,0 +1,36 @@
+# Smoke job: an unmodified hf CLI downloading a model through Shpiel with
+# nothing but HF_ENDPOINT set — the M0 exit criterion, running continuously
+# in the dev environment. Re-trigger from the Tilt UI after changes.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hf-smoke
+  namespace: shpiel-dev
+  labels:
+    app.kubernetes.io/name: hf-smoke
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hf-smoke
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: hf
+          image: hf-client
+          env:
+            - name: HF_ENDPOINT
+              value: http://shpiel.shpiel-dev.svc.cluster.local:8080
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |-
+              set -e
+              hf download fixtures/tiny-model --local-dir /tmp/model
+              test -f /tmp/model/config.json
+              test -f /tmp/model/model.safetensors
+              test -f /tmp/model/vae/decoder.bin
+              echo "smoke OK: hf download worked against shpiel"

@@ -1,0 +1,67 @@
+# Shpiel configuration reference. Everything here has a sensible default;
+# an empty file plus one backend and one route is a working server.
+# Precedence: CLI flags > SHPIEL_* env vars > this file > defaults.
+#
+# Validate with: shpiel config validate config.yaml
+---
+listen:
+  api: ":8080"
+  # admin: ":8081"        # admin API (v1.x), disabled unless set
+  metrics: ":9090" # Prometheus /metrics, disabled if empty
+
+limits:
+  max_concurrent_uploads: 64
+  max_concurrent_downloads: 512
+  per_conn_buffer_mb: 8
+
+upstream:
+  huggingface:
+    endpoint: https://huggingface.co
+    # Env var holding the org token used for upstream fetches; researchers
+    # never see this credential.
+    token_env: HF_ORG_TOKEN
+    # On cache miss, fetch from upstream, persist to the routed backend,
+    # then serve. The MatrixHub-killer feature.
+    pull_through: true
+    # How long a cached branch/tag resolution is served before
+    # revalidating upstream. Commit SHAs are immutable and never
+    # revalidated. 0 revalidates on every request.
+    refresh_interval: 5m
+
+backends:
+  # Coming in M1 — oci (Zot/Harbor/GHCR) and s3 backends:
+  #   zot:
+  #     type: oci
+  #     url: https://zot.internal:5000
+  #     format: modelpack          # or: tar-layers (image-volume-safe)
+  #     layer_per_file: true
+  #     auth: { username_env: ZOT_USER, password_env: ZOT_PASS }
+  #   archive:
+  #     type: s3
+  #     bucket: models-archive
+  #     region: us-central1
+  cache:
+    type: fs
+    # HF-cache-compatible layout: mount this path (PVC/NFS) into pods and
+    # point HF_HUB_CACHE at it for HF_HUB_OFFLINE=1 consumption.
+    path: /var/lib/shpiel
+
+routes:
+  # First match wins. Globs use "/" between owner and name; "*" alone
+  # matches everything.
+  # - match: "exigence/*"
+  #   primary: zot
+  #   replicas: [archive]
+  - match: "*"
+    primary: cache
+
+auth:
+  mode: none # none | passthrough (local, oidc: v1.x)
+  cache_ttl: 5m
+
+xet:
+  enabled: false # v1.x
+
+log:
+  level: info # debug | info | warn | error
+  format: json # json | text

@@ -1,0 +1,17 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shpiel
+  labels:
+    app.kubernetes.io/name: shpiel
+spec:
+  selector:
+    app.kubernetes.io/name: shpiel
+  ports:
+    - name: api
+      port: 8080
+      targetPort: api
+    - name: metrics
+      port: 9090
+      targetPort: metrics

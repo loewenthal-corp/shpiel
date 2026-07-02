@@ -1,0 +1,139 @@
+# Taskfile for shpiel — HF-compatible model relay
+#
+# Key commands:
+#   task do       - Run all quality checks (generate, format, lint, test, build)
+#   task test     - Run Go tests
+#   task e2e      - Run end-to-end tests with a real huggingface_hub client
+#   task dev      - Bring up the Tilt dev environment
+#
+---
+version: "3"
+
+vars:
+  CPU_COUNT:
+    sh: nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "4"
+  PARALLEL_COUNT:
+    sh: echo $(({{.CPU_COUNT}} * 2))
+  GIT_COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo "unknown"
+  BUILD_TIME:
+    sh: date -u +%Y-%m-%dT%H:%M:%SZ
+  LDFLAGS: "-X github.com/loewenthal-corp/shpiel/internal/buildinfo.Commit={{.GIT_COMMIT}} -X github.com/loewenthal-corp/shpiel/internal/buildinfo.BuildTime={{.BUILD_TIME}}"
+
+tasks:
+  do:
+    desc: "Run all quality checks"
+    cmds:
+      - task: generate
+      - task: format
+      - task: lint
+      - task: test
+      - task: build
+
+  init:
+    desc: "Download Go module dependencies"
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go mod download
+
+  generate:
+    desc: "Generate Go code"
+    dir: "{{.TASKFILE_DIR}}"
+    sources:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+    cmds:
+      - go generate ./...
+
+  format:
+    desc: "Format the codebase"
+    aliases: [f, fmt]
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go fmt ./...
+      - task: format:yaml
+
+  format:yaml:
+    desc: "Run the yamlfmt formatter on all yaml files"
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - yamlfmt .
+
+  lint:
+    desc: "Lint the codebase"
+    aliases: [l]
+    dir: "{{.TASKFILE_DIR}}"
+    sources:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".golangci.yml"
+    cmds:
+      - golangci-lint run ./...
+
+  lint:vet:
+    desc: "Run go vet only"
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go vet -p {{.CPU_COUNT}} ./...
+
+  test:
+    desc: "Run Go tests"
+    aliases: [t]
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go test -p {{.CPU_COUNT}} -parallel {{.PARALLEL_COUNT}} ./...
+
+  test:full:
+    desc: "Full test suite with race detection and coverage (CI)"
+    aliases: [tfull]
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go test -race -p {{.CPU_COUNT}} -parallel {{.PARALLEL_COUNT}} -cover ./...
+
+  test:coverage-html:
+    desc: "Generate HTML coverage report"
+    aliases: [cov]
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+
+  e2e:
+    desc: "Run end-to-end tests (real huggingface_hub client in Docker against shpiel)"
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go test -tags e2e -count 1 -timeout 10m ./test/e2e/...
+
+  build:
+    desc: "Build all binaries"
+    deps:
+      - build::shpiel
+
+  build::*:
+    vars:
+      BINARY_NAME: "{{index .MATCH 0}}"
+    dir: "{{.TASKFILE_DIR}}"
+    desc: "Build the {{.BINARY_NAME}} binary"
+    sources:
+      - "internal/**/*.go"
+      - "cmd/{{.BINARY_NAME}}/**/*.go"
+      - "go.mod"
+      - "go.sum"
+    generates:
+      - "dist/{{.BINARY_NAME}}"
+    cmds:
+      - CGO_ENABLED=0 go build -ldflags '{{.LDFLAGS}}' -o dist/{{.BINARY_NAME}} ./cmd/{{.BINARY_NAME}}
+
+  dev:
+    desc: "Bring up the Tilt dev environment (requires a local k8s cluster)"
+    cmds:
+      - tilt up
+
+  clean:
+    desc: "Clean build artifacts and test cache"
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go clean -testcache
+      - rm -rf dist/ coverage.out coverage.html

@@ -1,0 +1,54 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shpiel
+  labels:
+    app.kubernetes.io/name: shpiel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shpiel
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shpiel
+    spec:
+      containers:
+        - name: shpiel
+          image: shpiel
+          args: ["serve", "--config", "/etc/shpiel/config.yaml"]
+          ports:
+            - name: api
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: api
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/shpiel
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/shpiel
+      volumes:
+        - name: config
+          configMap:
+            name: shpiel-config
+        - name: data
+          emptyDir: {}

@@ -1,0 +1,28 @@
+# Dev-cluster shpiel config: pull-through from the in-cluster fakehub so
+# the whole environment is hermetic (no public internet).
+---
+listen:
+  api: ":8080"
+  metrics: ":9090"
+
+upstream:
+  huggingface:
+    endpoint: http://fakehub.shpiel-dev.svc.cluster.local:8081
+    pull_through: true
+    refresh_interval: 1m
+
+backends:
+  cache:
+    type: fs
+    path: /var/lib/shpiel
+
+routes:
+  - match: "*"
+    primary: cache
+
+auth:
+  mode: none
+
+log:
+  level: debug
+  format: text

@@ -1,0 +1,52 @@
+# Zot: the in-cluster OCI registry the M1 OCI backend will target. Deployed
+# in the dev environment now so the flagship Spegel story (Shpiel -> Zot ->
+# image volumes -> Spegel P2P) can be developed against real infrastructure.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zot
+  namespace: shpiel-dev
+  labels:
+    app.kubernetes.io/name: zot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zot
+    spec:
+      containers:
+        - name: zot
+          image: ghcr.io/project-zot/zot:v2.1.8
+          ports:
+            - name: registry
+              containerPort: 5000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zot
+  namespace: shpiel-dev
+  labels:
+    app.kubernetes.io/name: zot
+spec:
+  selector:
+    app.kubernetes.io/name: zot
+  ports:
+    - name: registry
+      port: 5000
+      targetPort: registry

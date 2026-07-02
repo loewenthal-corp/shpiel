@@ -1,0 +1,87 @@
+---
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - bodyclose
+    - nilerr
+    - reassign
+    - rowserrcheck
+    - sqlclosecheck
+    - durationcheck
+    - copyloopvar
+    - intrange
+    - gosec
+    - gocritic
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+      exclude-functions:
+        - io.Copy
+        - (io.Closer).Close
+        - (net/http.ResponseWriter).Write
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST1000"
+        - "-ST1003"
+        - "-ST1016"
+        - "-ST1020"
+        - "-ST1021"
+        - "-ST1022"
+
+    gosec:
+      excludes:
+        - G104
+        - G304
+        - G401
+        - G501
+        - G115
+        # sha1 is not used cryptographically: git blob OIDs (the Hub's
+        # ETag format for regular files) are sha1 by definition.
+        - G505
+        # The content store is deliberately world-readable: HF-cache
+        # layout volumes are consumed by other pods/uids (PVC, NFS).
+        - G301
+        - G306
+
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+        - singleCaseSwitch
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+    paths:
+      - internal/gen
+      - third_party$
+      - ".*\\.pb\\.go$"
+
+formatters:
+  enable:
+    - gofmt
+
+output:
+  sort-results: true
+  sort-order:
+    - file
