@@ -1,11 +1,12 @@
 # Shpiel — agent guide
 
 Shpiel is an HF-compatible model relay: it speaks the Hugging Face Hub API
-on the front (so `hf`, `huggingface_hub`, vLLM, SGLang, and TGI work
-unchanged with `HF_ENDPOINT` set) and writes to pluggable backends on the
-back — filesystems today; OCI registries (Zot/Harbor), S3, and upstream HF
-mirroring next. See [spec.md](spec.md) for the full product spec and
-milestones.
+on the front — read, write, and the Xet protocol (so `hf`,
+`huggingface_hub` 0.x and 1.x, vLLM, SGLang, and TGI work unchanged with
+`HF_ENDPOINT` set) — and stores models in pluggable backends on the back:
+filesystems (HF-cache layout) and OCI registries (Zot/Harbor) today; S3
+and upstream HF mirroring next. See [spec.md](spec.md) for the full
+product spec and milestones (M0, M1, and M3/M4-core are done).
 
 ## Architecture in one pass
 
@@ -57,17 +58,23 @@ uncommitted generated files.
 
 ## The testing story (read this before changing the API surface)
 
-1. **Conformance suite** (`test/conformance`) is the executable spec of the
-   HF read API. It runs twice: against a direct-seeded backend (cache-hit
-   path) and against pull-through-from-fakehub (cache-miss path). Both must
-   stay contract-identical. Point it at any live endpoint with
+1. **Conformance suite** (`test/conformance`) is the executable spec of
+   the HF API. The same read contract runs against every serving
+   configuration: direct-seeded FS (cache hit), pull-through-from-fakehub
+   (cache miss), write-then-read (the full write protocol pushes the
+   fixture, then the read contract runs on what landed), and all of those
+   again on the OCI backend in both formats. Every configuration must stay
+   contract-identical. Point it at any live endpoint with
    `SHPIEL_CONFORMANCE_URL`.
 2. **e2e** (`test/e2e`, `-tags e2e`) starts the real compiled binary and
-   drives it with the real Python `huggingface_hub` + `hf` CLI in Docker.
-   `E2E_OK` in its output is the M0 exit criterion.
+   drives it with the real Python `huggingface_hub` + `hf` CLI (and real
+   `hf_xet`) in Docker: pull-through downloads (`E2E_OK`), LFS uploads
+   (`E2E_UPLOAD_OK`), pushes landing in a real Zot container, and Xet
+   uploads + chunk-level downloads with no client flags (`E2E_XET_OK`).
 3. Unit tests live next to their packages; `internal/relay` tests encode
    pull-through semantics (singleflight collapse, stale-ref revalidation,
-   serve-stale-on-upstream-outage).
+   serve-stale-on-upstream-outage), `internal/xet` tests the binary
+   formats round-trip.
 
 When adding surface area: extend the conformance suite first, watch it
 fail, then implement.
@@ -82,3 +89,9 @@ fail, then implement.
   file > defaults. Secrets only via `*_env` indirection.
 - Errors returned to clients must carry `X-Error-Code` — see
   `internal/server/errors.go`.
+- Xet binary formats are ground-truthed against huggingface/xet-core, and
+  shipping `hf_xet` wheels differ from that repo's main (footerless
+  sequential shards, `/shards` without `/v1`, token info in `X-Xet-*`
+  response headers). When a client rejects or sends something unexpected,
+  set `SHPIEL_XET_DEBUG_DIR` to dump rejected shards and debug from real
+  bytes — the real client is the oracle, not the docs.

@@ -1,10 +1,10 @@
 # Shpiel
 
 **An HF-compatible model relay.** Shpiel speaks the Hugging Face Hub API on
-the front and writes to arbitrary backends on the back — filesystems today,
-OCI registries (Zot, Harbor), object storage, and upstream HF mirroring
-next — so every existing HF tool works unchanged by setting one environment
-variable:
+the front — read, write, and Xet — and stores models in pluggable backends
+on the back: filesystems (HF-cache-compatible) and OCI registries (Zot,
+Harbor) today, object storage and upstream HF mirroring next. Every
+existing HF tool works unchanged by setting one environment variable:
 
 ```bash
 export HF_ENDPOINT=https://shpiel.internal

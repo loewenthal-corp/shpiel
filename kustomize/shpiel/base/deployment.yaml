@@ -46,9 +46,13 @@ spec:
               readOnly: true
             - name: data
               mountPath: /var/lib/shpiel
+            - name: xet-data
+              mountPath: /var/lib/shpiel-xet
       volumes:
         - name: config
           configMap:
             name: shpiel-config
         - name: data
+          emptyDir: {}
+        - name: xet-data
           emptyDir: {}

@@ -23,6 +23,10 @@ routes:
   - match: "*"
     primary: zot
 
+xet:
+  enabled: true
+  data_dir: /var/lib/shpiel-xet
+
 auth:
   mode: none
 
