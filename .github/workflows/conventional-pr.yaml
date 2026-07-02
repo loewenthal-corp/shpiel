@@ -1,0 +1,35 @@
+---
+#################################################################################
+#                            DO NOT EDIT DIRECTLY.                              #
+# File is managed by Tofu at https://github.com/loewenthal-corp/infrastructure  #
+#################################################################################
+name: conventional-pr
+"on":
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - edited
+      - synchronize
+jobs:
+  lint-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@af35edadc00be37caa72ed9f3e6d5f7801bfdf09 # v1
+        with:
+          app-id: ${{ secrets.LOEWENTHAL_CORPORATION_BOT_APP_ID }}
+          private-key: ${{ secrets.LOEWENTHAL_CORPORATION_BOT_PRIVATE_SIGNING_KEY }}
+      - uses: CondeNast/conventional-pull-request-action@3ce30fdb4d2beef8b941f23a1114dd8188eba082 # v0.2.0
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        with:
+          # to override config-conventional rules, specify a relative path to your rules module, actions/checkout is required for this setting!
+          # commitlintRulesPath: './commitlint.rules.js' # default: undefined
+          # if the PR contains a single commit, fail if the commit message and the PR title do not match
+          commitTitleMatch: 'true' # default: 'true'
+          # if you squash merge PRs and enabled "Default to PR title for squash merge commits", you can disable all linting of commits
+          ignoreCommits: 'true' # default: 'false'
