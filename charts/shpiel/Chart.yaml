@@ -1,11 +1,11 @@
 apiVersion: v2
 name: shpiel
 description: >-
-  HF-compatible model relay: the Hugging Face Hub API (read, write, Xet) on
-  the front, pluggable backends (filesystem, OCI registries) on the back.
+  HF-compatible model relay: the Hugging Face Hub API (read, write, Xet) on the
+  front, pluggable backends (filesystem, OCI registries) on the back.
 type: application
-version: 0.0.1 # x-release-please-version
-appVersion: "0.0.1" # x-release-please-version
+version: 0.1.0
+appVersion: 0.0.1
 home: https://github.com/loewenthal-corp/shpiel
 sources:
   - https://github.com/loewenthal-corp/shpiel
