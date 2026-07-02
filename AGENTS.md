@@ -22,6 +22,10 @@ internal/relay      backend-first reads; pull-through on miss (singleflight);
    │      │                          mountable tar-layers; staged→promoted commits)
    │      └── internal/ociclient     minimal distribution-spec client (ranged
    │                                 reads, chunked streaming uploads)
+   ├── internal/xet                  Xet protocol server: CAS API (xorb/shard
+   │                                 ingest + reconstruction), format parsers,
+   │                                 content-addressed store; ingested files
+   │                                 materialize into the routed backend
    └── internal/upstream             huggingface.co client (pull-through source)
 ```
 

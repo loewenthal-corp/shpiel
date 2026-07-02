@@ -65,8 +65,14 @@ auth:
   mode: none # none | passthrough (local, oidc: v1.x)
   cache_ttl: 5m
 
+# Xet protocol support: with it on, huggingface_hub 1.x uploads work with
+# no client-side flags (hub 1.x has no LFS fallback), and hf_xet clients
+# download chunk-level through the reconstruction API. Ingested files are
+# always also materialized into the routed backend, so non-xet clients and
+# all backends serve them normally.
 xet:
-  enabled: false # v1.x
+  enabled: false
+  # data_dir: /var/lib/shpiel-xet   # required when enabled; xorbs + records
 
 log:
   level: info # debug | info | warn | error

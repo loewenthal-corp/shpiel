@@ -17,6 +17,7 @@ import (
 	"github.com/loewenthal-corp/shpiel/internal/relay"
 	"github.com/loewenthal-corp/shpiel/internal/server"
 	"github.com/loewenthal-corp/shpiel/internal/upstream"
+	"github.com/loewenthal-corp/shpiel/internal/xet"
 )
 
 // App is an assembled Shpiel instance.
@@ -93,9 +94,21 @@ func Build(cfg config.Config) (*App, error) {
 		Log:             log,
 	})
 
+	var xetSvc *xet.Service
+	if cfg.Xet.Enabled {
+		store, err := xet.NewStore(cfg.Xet.DataDir)
+		if err != nil {
+			return nil, err
+		}
+		xetSvc, err = xet.NewService(store, rl, log)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &App{
 		Config:  cfg,
-		Server:  server.New(cfg, rl, up, m, log),
+		Server:  server.New(cfg, rl, up, xetSvc, m, log),
 		Relay:   rl,
 		Metrics: m,
 		Log:     log,

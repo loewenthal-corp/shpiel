@@ -60,7 +60,7 @@ Today the bridge between these planes is ad hoc: shell scripts, MatrixHub-style 
 - Preupload: `POST /api/models/{repo}/preupload/{rev}` — decide per-file: inline vs LFS vs Xet
 - LFS batch API + S3-style multipart upload endpoints (what `huggingface_hub` falls back to when Xet is unavailable)
 - Repo management: create/delete repo, branch/tag create, move
-- **v1 ships LFS-complete, Xet-advertising-off.** Reads degrade gracefully in every `huggingface_hub` version (no `X-Xet-*` headers → plain HTTP path). Writes: `huggingface_hub` 0.x degrades to LFS automatically, but **1.x bundles `hf_xet` and uploads via Xet with no LFS fallback** — it requests `/api/{type}s/{repo}/xet-write-token/{rev}` unconditionally. Until Xet write lands (M4), hub-1.x users must set `HF_HUB_DISABLE_XET=1` to push; Shpiel answers the xet-token endpoints with a 404 that says exactly that. This moves Xet from "differentiator" to compat-critical for the write path.
+- **Xet is compat-critical for writes and Shpiel speaks it.** Reads degrade gracefully in every `huggingface_hub` version (no `X-Xet-*` headers → plain HTTP path). Writes: `huggingface_hub` 0.x degrades to LFS automatically, but **1.x bundles `hf_xet` and uploads via Xet with no LFS fallback** — it requests `/api/{type}s/{repo}/xet-write-token/{rev}` unconditionally. Shpiel therefore implements the Xet server side (`xet.enabled`): token endpoints, xorb/shard ingest, and the reconstruction API. Ingested files are additionally *materialized* into the routed backend keyed by sha256, so every backend and non-xet client serves them normally; xorbs and reconstruction records are kept for chunk-level xet reads. With `xet.enabled: false`, hub-1.x pushers must set `HF_HUB_DISABLE_XET=1` and Shpiel's xet-token 404 says exactly that. Not yet implemented: global chunk-dedup query (served as 404 = "no dedup info"; per-xorb dedup still applies) and server-side chunking of non-xet content.
 
 **Xet (v1.x, the differentiator):**
 - The Xet protocol is publicly specified (chunking via gearhash CDC, chunk/xorb/shard hashing, xorb format, CAS HTTP API, reconstruction API, token issuance). Clients are open source (`xet-core`, `hf_xet`); the server is not — Shpiel becomes the first OSS Xet-speaking server.
@@ -206,8 +206,8 @@ researcher: hf upload exigence/gemma-4-31b-ft ...   (HF_ENDPOINT=shpiel)
 | **M0 — Skeleton** (2–3 wk) | Binary, kong CLI/config, read path + pull-through, FS backend, metrics, healthz | `HF_ENDPOINT=shpiel` + `hf download` + vLLM `--model` work against pull-through cache |
 | **M1 — Write path** (3–4 wk) | Commit/preupload/LFS-multipart, token passthrough, OCI backend (ModelPack + tar-layer modes) | `push_to_hub()` and `hf upload` land a mountable OCI artifact in Zot; image-volume mount verified on GKE |
 | **M2 — Ops-ready** (2–3 wk) | Helm chart + Kustomize, fan-out replication + retry queue, admin API, audit log, dashboards, local mode polish | Chart published; Spegel reference architecture doc + benchmark published |
-| **M3 — Xet read** | Reconstruction API + xorb store on S3 backend | `hf_xet` clients download at chunk level from Shpiel |
-| **M4 — Xet write** | CAS ingest (xorb/shard upload, dedup query, token issuance) | Chunk-dedup ratio metric shows real savings across fine-tune pushes |
+| **M3 — Xet read** ✅ | Reconstruction API + local xorb store (S3 xorb store: M3.x) | `hf_xet` clients download at chunk level from Shpiel — verified in e2e |
+| **M4 — Xet write** ✅ (core) | CAS ingest (xorb/shard upload, token issuance, materialization); remaining: global dedup query, chunk-dedup ratio metric | Unmodified hub 1.x `upload_folder` pushes through Xet with no env vars — verified in e2e |
 
 ## 10. Open questions
 

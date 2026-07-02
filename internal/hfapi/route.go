@@ -116,7 +116,12 @@ func parseAPIRoute(segs []string) (Route, bool) {
 				"xet-read-token":  RouteXetToken,
 				"xet-write-token": RouteXetToken,
 			}[segs[idLen]]
-			return Route{Kind: routeKind, RepoKind: kind, Repo: repo, Revision: segs[idLen+1]}, true
+			route := Route{Kind: routeKind, RepoKind: kind, Repo: repo, Revision: segs[idLen+1]}
+			if routeKind == RouteXetToken {
+				// Path carries the token scope ("read" or "write").
+				route.Path = strings.TrimSuffix(strings.TrimPrefix(segs[idLen], "xet-"), "-token")
+			}
+			return route, true
 		case "tree":
 			if len(segs) < idLen+2 {
 				return Route{}, false

@@ -114,9 +114,15 @@ type Auth struct {
 	CacheTTL time.Duration `yaml:"cache_ttl"`
 }
 
-// Xet gates the Xet protocol surface (v1.x).
+// Xet configures the Xet protocol surface: the CAS API (xorb/shard ingest,
+// chunk-level reconstruction) plus xet token endpoints. Uploaded files are
+// always ALSO materialized into the routed backend, so non-xet clients and
+// every backend serve them normally.
 type Xet struct {
 	Enabled bool `yaml:"enabled"`
+	// DataDir is the local directory holding xorbs and reconstruction
+	// records. Content-addressed and global (cross-repo dedup).
+	DataDir string `yaml:"data_dir,omitempty"`
 }
 
 // Log configures structured logging.
@@ -157,7 +163,7 @@ func Default() Config {
 }
 
 // Local returns the zero-config laptop-mode configuration: localhost bind,
-// filesystem backend under dataDir, pull-through enabled.
+// filesystem backend under dataDir, pull-through enabled, Xet uploads on.
 func Local(dataDir string) Config {
 	cfg := Default()
 	cfg.Listen.API = "127.0.0.1:8080"
@@ -167,6 +173,9 @@ func Local(dataDir string) Config {
 		"local": {Type: "fs", Path: dataDir},
 	}
 	cfg.Routes = []Route{{Match: "*", Primary: "local"}}
+	cfg.Xet.Enabled = true
+	// Dot-prefixed so HF cache tooling scanning dataDir ignores it.
+	cfg.Xet.DataDir = filepath.Join(dataDir, ".xet")
 	return cfg
 }
 
@@ -258,8 +267,8 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Xet.Enabled {
-		errs = append(errs, errors.New("xet.enabled: Xet support is not implemented yet (v1.x)"))
+	if c.Xet.Enabled && c.Xet.DataDir == "" {
+		errs = append(errs, errors.New("xet.enabled requires xet.data_dir"))
 	}
 
 	switch c.Log.Format {

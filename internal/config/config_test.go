@@ -106,7 +106,7 @@ func TestValidateCatchesMistakes(t *testing.T) {
 		{"fs without path", func(c *Config) { c.Backends = map[string]BackendConfig{"x": {Type: "fs"}} }, "requires path"},
 		{"route to unknown backend", func(c *Config) { c.Routes = []Route{{Match: "*", Primary: "ghost"}} }, "not a configured backend"},
 		{"bad auth mode", func(c *Config) { c.Auth.Mode = "vibes" }, "auth.mode"},
-		{"xet not implemented", func(c *Config) { c.Xet.Enabled = true }, "not implemented"},
+		{"xet without data dir", func(c *Config) { c.Xet.Enabled = true; c.Xet.DataDir = "" }, "xet.data_dir"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

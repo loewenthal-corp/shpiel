@@ -17,6 +17,7 @@ import (
 	"github.com/loewenthal-corp/shpiel/internal/backend"
 	"github.com/loewenthal-corp/shpiel/internal/buildinfo"
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
+	"github.com/loewenthal-corp/shpiel/internal/xet"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -214,6 +215,17 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 	if entry.LFS != nil {
 		h.Set(hfapi.HeaderLinkedETag, `"`+entry.LFS.SHA256+`"`)
 		h.Set(hfapi.HeaderLinkedSize, strconv.FormatInt(entry.Size, 10))
+		// Advertise chunk-level xet download when we hold a reconstruction
+		// for this exact content; hf_xet clients then fetch through the
+		// CAS API, everyone else ignores the headers.
+		if s.xet != nil {
+			if fileHash, ok := s.xet.Store().FileHashBySHA256(entry.LFS.SHA256); ok {
+				scheme, host := requestSchemeHost(r)
+				h.Set(xet.HeaderHash, fileHash)
+				h.Set(xet.HeaderRefreshRoute, fmt.Sprintf("%s://%s/api/%s/%s/xet-read-token/%s",
+					scheme, host, route.RepoKind.APIPrefix(), route.Repo, m.CommitSHA))
+			}
+		}
 	}
 	h.Set("Accept-Ranges", "bytes")
 	h.Set("Content-Type", contentTypeFor(entry.Path))
@@ -263,6 +275,35 @@ func contentTypeFor(p string) string {
 		return ct
 	}
 	return "application/octet-stream"
+}
+
+// handleXetToken serves GET /api/{type}s/{id}/xet-{read,write}-token/{rev}.
+// When xet is enabled it mints a CAS token (connection info rides in
+// response headers, where huggingface_hub looks); when disabled it answers
+// the actionable 404 — hub 1.x uploads have no LFS fallback, so the
+// message tells users exactly what to set.
+func (s *Server) handleXetToken(w http.ResponseWriter, r *http.Request) {
+	if s.xet == nil {
+		writeHFError(w, http.StatusNotFound, "",
+			"Xet is not enabled on this endpoint. Set HF_HUB_DISABLE_XET=1 to upload via LFS, or enable xet in the Shpiel config.")
+		return
+	}
+	route := routeFrom(r)
+	scope := route.Path // "read" or "write", from the URL keyword
+	if scope == "write" && !s.authorizeWrite(w, r) {
+		return
+	}
+	// Reads follow the read path's openness: mode none serves anonymously,
+	// passthrough validates the caller's token upstream.
+	if scope == "read" && s.cfg.Auth.Mode == "passthrough" {
+		token := bearerToken(r)
+		ok, err := s.validateToken(r.Context(), token)
+		if err != nil || !ok {
+			writeHFError(w, http.StatusUnauthorized, "", "Invalid user token.")
+			return
+		}
+	}
+	s.xet.WriteTokenResponse(w, r, scope, route.RepoKind, route.Repo)
 }
 
 // handleWhoAmI serves GET /api/whoami-v2. In passthrough mode the call is

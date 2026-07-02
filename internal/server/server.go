@@ -19,6 +19,7 @@ import (
 	"github.com/loewenthal-corp/shpiel/internal/metrics"
 	"github.com/loewenthal-corp/shpiel/internal/relay"
 	"github.com/loewenthal-corp/shpiel/internal/upstream"
+	"github.com/loewenthal-corp/shpiel/internal/xet"
 )
 
 // Server hosts the HF API listener and the optional metrics listener.
@@ -32,6 +33,8 @@ type Server struct {
 	// validation; it is set even when pull-through is disabled.
 	upstream *upstream.Client
 	tokens   *tokenValidator
+	// xet is the CAS service; nil when xet.enabled is false.
+	xet *xet.Service
 
 	// downloadSem / uploadSem bound concurrent content transfers
 	// (limits.max_concurrent_*); nil means unlimited.
@@ -42,8 +45,9 @@ type Server struct {
 	metricsListener net.Listener
 }
 
-// New assembles a Server. up may be nil (no upstream configured).
-func New(cfg config.Config, rl *relay.Relay, up *upstream.Client, m *metrics.Metrics, log *slog.Logger) *Server {
+// New assembles a Server. up and xetSvc may be nil (no upstream / xet
+// disabled).
+func New(cfg config.Config, rl *relay.Relay, up *upstream.Client, xetSvc *xet.Service, m *metrics.Metrics, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -53,6 +57,7 @@ func New(cfg config.Config, rl *relay.Relay, up *upstream.Client, m *metrics.Met
 		metrics:  m,
 		log:      log,
 		upstream: up,
+		xet:      xetSvc,
 		tokens:   newTokenValidator(cfg.Auth.CacheTTL),
 	}
 	if n := cfg.Limits.MaxConcurrentDownloads; n > 0 {
@@ -115,6 +120,18 @@ func (s *Server) Handler() http.Handler {
 	// reserved first segment (not a valid place for a repo owner clash to
 	// matter: hrefs are always server-generated).
 	mux.HandleFunc("PUT /shpiel-lfs/{kind}/{rest...}", s.instrument("lfs_upload", s.handleLFSUpload))
+	if s.xet != nil {
+		// The Xet CAS API lives under the reserved /xet/ namespace; the
+		// token endpoints stay under /api and route through dispatchHF.
+		mux.HandleFunc("POST /xet/v1/xorbs/{prefix}/{hash}", s.instrument("xet_xorb", s.xet.HandleXorbUpload))
+		mux.HandleFunc("POST /xet/v1/shards", s.instrument("xet_shard", s.xet.HandleShardUpload))
+		// Shipping hf_xet clients post shards without the /v1 prefix (the
+		// OpenAPI spec is newer than the deployed client); serve both.
+		mux.HandleFunc("POST /xet/shards", s.instrument("xet_shard", s.xet.HandleShardUpload))
+		mux.HandleFunc("GET /xet/v1/reconstructions/{file_id}", s.instrument("xet_reconstruction", s.xet.HandleReconstruction))
+		mux.HandleFunc("GET /xet/v1/chunks/{prefix}/{hash}", s.instrument("xet_chunk_query", s.xet.HandleChunkQuery))
+		mux.HandleFunc("GET /xet/data/{hash}", s.instrument("xet_data", s.xet.HandleXorbData))
+	}
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
 	mux.HandleFunc("GET /{$}", s.instrument("root", s.handleRoot))
@@ -152,13 +169,7 @@ func (s *Server) dispatchHF(w http.ResponseWriter, r *http.Request) {
 	case route.Kind == hfapi.RouteLFSBatch && r.Method == http.MethodPost:
 		s.instrument("lfs_batch", s.withRoute(route, s.handleLFSBatch))(w, r)
 	case route.Kind == hfapi.RouteXetToken:
-		s.instrument("xet_token", func(w http.ResponseWriter, r *http.Request) {
-			// huggingface_hub >= 1.x uploads via Xet by default and does
-			// not fall back to LFS on failure; until Shpiel ships Xet
-			// support (spec M3/M4), clients must disable it explicitly.
-			writeHFError(w, http.StatusNotFound, "",
-				"Xet is not supported by this endpoint yet. Set HF_HUB_DISABLE_XET=1 to upload via LFS.")
-		})(w, r)
+		s.instrument("xet_token", s.withRoute(route, s.handleXetToken))(w, r)
 	default:
 		s.instrument("unknown", func(w http.ResponseWriter, r *http.Request) {
 			writeHFError(w, http.StatusMethodNotAllowed, "", "Method not allowed.")

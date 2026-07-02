@@ -59,10 +59,15 @@ OCI backend lands models in Zot/Harbor as either ModelPack-style artifacts
 or image-volume-mountable tar-layer images — commits tagged by SHA, refs
 as tags, one layer per file.
 
-One caveat for pushers: `huggingface_hub` 1.x uploads via Xet by default
-and does not fall back; set `HF_HUB_DISABLE_XET=1` until Shpiel's Xet
-support (M4) lands. Downloads need no flag. S3 backend, fan-out
-replication, Helm chart, and Xet are next — see [spec.md](spec.md) §9.
+**M3/M4 (Xet)**: Shpiel speaks the Xet protocol server-side — the first
+OSS implementation. With `xet.enabled`, unmodified `huggingface_hub` 1.x
+uploads flow through the CAS API (token endpoints, xorb + shard ingest)
+with no client-side flags, files materialize into the routed backend for
+plain-HTTP consumers, and `hf_xet` clients download at chunk level through
+the reconstruction API. With xet off, hub-1.x pushers set
+`HF_HUB_DISABLE_XET=1` (hub 1.x has no LFS fallback). S3 backend, fan-out
+replication, Helm chart, and global chunk dedup are next — see
+[spec.md](spec.md) §9.
 
 ## Development
 
