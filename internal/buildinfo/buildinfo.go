@@ -4,8 +4,9 @@ package buildinfo
 import "runtime/debug"
 
 var (
-	// Version is the semantic version, set by release tooling.
-	Version = "dev"
+	// Version is the semantic version. The default tracks the latest
+	// release via release-please; builds may override it with -ldflags.
+	Version = "0.0.1" // x-release-please-version
 	// Commit is the short git commit hash, set via -ldflags.
 	Commit = "unknown"
 	// BuildTime is the UTC build timestamp, set via -ldflags.

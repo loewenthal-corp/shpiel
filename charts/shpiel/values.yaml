@@ -8,7 +8,8 @@
 
 image:
   repository: ghcr.io/loewenthal-corp/shpiel
-  tag: latest
+  # Empty tag follows the chart's appVersion (the matching release).
+  tag: ""
   pullPolicy: IfNotPresent
 
 replicaCount: 1

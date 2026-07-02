@@ -27,6 +27,20 @@ infrastructure, where [Spegel](https://spegel.dev) and Kubernetes image
 volumes can fan them out at LAN speed. See [spec.md](spec.md) for the whole
 story.
 
+## Install
+
+Multi-arch images (linux/amd64, linux/arm64) publish to GHCR on every
+release, and the Helm chart ships as an OCI artifact alongside them:
+
+```bash
+docker run -p 8080:8080 ghcr.io/loewenthal-corp/shpiel:latest \
+  serve --local --listen-api :8080
+
+helm install shpiel oci://ghcr.io/loewenthal-corp/charts/shpiel
+```
+
+Or build from source: `task build` produces `dist/shpiel`.
+
 ## Quickstart
 
 ```bash
