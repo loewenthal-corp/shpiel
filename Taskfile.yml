@@ -138,6 +138,12 @@ tasks:
     cmds:
       - CGO_ENABLED=0 go build -ldflags '{{.LDFLAGS}}' -o dist/{{.BINARY_NAME}} ./cmd/{{.BINARY_NAME}}
 
+  release:snapshot:
+    desc: "Dry-run the GoReleaser build locally (no publishing)"
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - goreleaser release --snapshot --clean
+
   dev:
     desc: "Bring up the Tilt dev environment (requires a local k8s cluster)"
     cmds:
