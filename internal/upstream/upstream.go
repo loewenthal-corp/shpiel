@@ -40,14 +40,22 @@ type Client struct {
 // New creates a client for endpoint. orgToken may be empty (anonymous or
 // caller-token passthrough).
 func New(endpoint, orgToken string) *Client {
+	transport := http.DefaultTransport
+	if t, ok := transport.(*http.Transport); ok {
+		// A private transport: sharing http.DefaultTransport means anyone
+		// calling CloseIdleConnections on it (httptest servers do on
+		// Close) can break this client's in-flight requests.
+		transport = t.Clone()
+	}
 	return &Client{
 		endpoint: strings.TrimRight(endpoint, "/"),
 		orgToken: orgToken,
 		http: &http.Client{
 			// No overall timeout: file bodies can stream for a long time.
-			// Dial/TLS bounds come from DefaultTransport; callers bound
+			// Dial/TLS bounds come from the transport; callers bound
 			// metadata requests with contexts.
-			Timeout: 0,
+			Timeout:   0,
+			Transport: transport,
 		},
 	}
 }

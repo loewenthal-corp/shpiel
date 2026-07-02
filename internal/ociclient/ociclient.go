@@ -77,9 +77,19 @@ func New(baseURL, username, password string) (*Client, error) {
 		base:     strings.TrimRight(baseURL, "/"),
 		username: username,
 		password: password,
-		http:     &http.Client{},
-		tokens:   map[string]string{},
+		// A private transport: sharing http.DefaultTransport means anyone
+		// calling CloseIdleConnections on it (httptest servers do on
+		// Close) can break this client's in-flight requests.
+		http:   &http.Client{Transport: cloneDefaultTransport()},
+		tokens: map[string]string{},
 	}, nil
+}
+
+func cloneDefaultTransport() http.RoundTripper {
+	if t, ok := http.DefaultTransport.(*http.Transport); ok {
+		return t.Clone()
+	}
+	return http.DefaultTransport
 }
 
 // SHA256Digest returns the OCI digest string for content.
