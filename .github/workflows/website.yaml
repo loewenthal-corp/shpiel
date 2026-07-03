@@ -1,0 +1,34 @@
+---
+name: website
+
+"on":
+  workflow_dispatch:
+  pull_request:
+    paths: ["website/**", ".github/workflows/website.yaml"]
+  push:
+    branches: ["main"]
+    paths: ["website/**", ".github/workflows/website.yaml"]
+
+permissions:
+  contents: read
+
+# Deploys are handled by Cloudflare Workers Builds (repo connected in
+# the Cloudflare dashboard, path /website): production deploys on main,
+# preview versions with PR comments on other branches. This workflow
+# only typechecks, so the repo stays green without Cloudflare secrets.
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@e49f5cb4dd64ff0b0b659d1d8df499595451155a # v1
+        with:
+          cache: "true"
+
+      - name: Typecheck and validate the deploy bundle
+        run: task website:check

@@ -149,6 +149,37 @@ tasks:
     cmds:
       - tilt up
 
+  website:install:
+    desc: "Install website dependencies (hermit provides node + pnpm)"
+    dir: "{{.TASKFILE_DIR}}/website"
+    sources:
+      - "package.json"
+      - "pnpm-lock.yaml"
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  website:dev:
+    desc: "Run shpiel.dev locally (wrangler dev on :8787)"
+    dir: "{{.TASKFILE_DIR}}/website"
+    deps: ['website:install']
+    cmds:
+      - pnpm exec wrangler dev
+
+  website:check:
+    desc: "Typecheck the website worker and validate the deploy bundle"
+    dir: "{{.TASKFILE_DIR}}/website"
+    deps: ['website:install']
+    cmds:
+      - pnpm exec tsc --noEmit
+      - pnpm exec wrangler deploy --dry-run
+
+  website:deploy:
+    desc: "Deploy shpiel.dev to Cloudflare Workers"
+    dir: "{{.TASKFILE_DIR}}/website"
+    deps: ['website:install']
+    cmds:
+      - pnpm exec wrangler deploy
+
   clean:
     desc: "Clean build artifacts and test cache"
     dir: "{{.TASKFILE_DIR}}"
