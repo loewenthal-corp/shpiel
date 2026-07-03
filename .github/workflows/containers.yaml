@@ -60,7 +60,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
             org.opencontainers.image.title=shpiel
-            org.opencontainers.image.description=HF-compatible model relay
+            org.opencontainers.image.description=HF-to-OCI model relay: Hugging Face Hub API in, OCI artifacts out
 
       - name: Set up QEMU for cross-builds
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4

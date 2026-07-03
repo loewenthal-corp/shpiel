@@ -1,10 +1,12 @@
 # Shpiel
 
-**An HF-compatible model relay.** Shpiel speaks the Hugging Face Hub API —
-read, write, and Xet — and stores models in the infrastructure your
-cluster already runs: OCI registries and filesystems today, object storage
-next. Every existing HF tool works unchanged by setting one environment
-variable:
+**Push Hugging Face models straight into your OCI registry.** Shpiel
+speaks the Hugging Face Hub API — read, write, and Xet — so
+`push_to_hub()` lands weights as versioned, content-addressed OCI
+artifacts in the registry your cluster already runs, ready for image
+volumes and P2P distribution. (A filesystem backend ships too; object
+storage is next.) Every existing HF tool works unchanged by setting one
+environment variable:
 
 ```bash
 export HF_ENDPOINT=https://shpiel.internal

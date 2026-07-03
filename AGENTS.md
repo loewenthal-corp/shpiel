@@ -1,11 +1,11 @@
 # Shpiel — agent guide
 
-Shpiel is an HF-compatible model relay: it speaks the Hugging Face Hub API
+Shpiel is an HF-to-OCI model relay: it speaks the Hugging Face Hub API
 on the front — read, write, and the Xet protocol (so `hf`,
 `huggingface_hub` 0.x and 1.x, vLLM, SGLang, and TGI work unchanged with
-`HF_ENDPOINT` set) — and stores models in pluggable backends on the back:
-filesystems (HF-cache layout) and OCI registries (Zot/Harbor) today; S3
-and upstream HF mirroring next. See [spec.md](spec.md) for the full
+`HF_ENDPOINT` set) — and lands models as OCI artifacts in registries
+(Zot/Harbor) on the back; a filesystem backend (HF-cache layout) ships
+too, S3 and upstream HF mirroring next. See [spec.md](spec.md) for the full
 product spec and milestones (M0, M1, and M3/M4-core are done).
 
 ## Architecture in one pass

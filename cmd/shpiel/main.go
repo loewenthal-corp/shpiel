@@ -1,6 +1,7 @@
-// Command shpiel is an HF-compatible model relay: it speaks the Hugging
-// Face Hub API on the front and writes to pluggable backends on the back,
-// so every existing HF tool works unchanged by setting HF_ENDPOINT.
+// Command shpiel is an HF-to-OCI model relay: it speaks the Hugging Face
+// Hub API on the front and lands models as OCI artifacts in the registry
+// (or other pluggable backends) on the back, so every existing HF tool
+// works unchanged by setting HF_ENDPOINT.
 package main
 
 import (
@@ -125,7 +126,7 @@ func (versionCmd) Run() error {
 func main() {
 	k := kong.Parse(&cli{},
 		kong.Name("shpiel"),
-		kong.Description("HF-compatible model relay: Hugging Face API on the front, pluggable backends (OCI, S3, filesystem, upstream HF) on the back."),
+		kong.Description("HF-to-OCI model relay: Hugging Face API on the front, models stored as OCI artifacts (or filesystem, S3, upstream HF) on the back."),
 		kong.UsageOnError(),
 		kong.Vars{"version": "shpiel " + buildinfo.String()},
 	)
