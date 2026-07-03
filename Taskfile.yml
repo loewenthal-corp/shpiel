@@ -66,7 +66,11 @@ tasks:
     cmds:
       # charts/ is excluded: templates are not valid YAML, and
       # release-please rewrites Chart.yaml in its own style every release.
-      - git ls-files -co --exclude-standard '*.yaml' '*.yml' ':!charts' | xargs yamlfmt
+      # website/pnpm-lock.yaml is excluded: it is pnpm-generated and must stay
+      # in pnpm's own format. yamlfmt prepends a `---` document-start marker
+      # (include_document_start), which pnpm v11 rejects as a broken/empty
+      # lockfile (ERR_PNPM_BROKEN_LOCKFILE).
+      - git ls-files -co --exclude-standard '*.yaml' '*.yml' ':!charts' ':!website/pnpm-lock.yaml' | xargs yamlfmt
 
   lint:
     desc: "Lint the codebase"

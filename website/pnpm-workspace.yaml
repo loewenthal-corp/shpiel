@@ -1,0 +1,17 @@
+---
+# Consumed by two different pnpm versions — keep both halves:
+#   * pnpm 11 (GitHub CI + local, via hermit) reads `allowBuilds` to approve
+#     the esbuild/workerd native builds; it errors otherwise
+#     (ERR_PNPM_IGNORED_BUILDS).
+#   * pnpm 10.11.1 (Cloudflare Workers Builds) predates `allowBuilds` (added in
+#     10.26), so it reads the same list from package.json's
+#     `pnpm.onlyBuiltDependencies` instead — keep the two lists in sync. pnpm 10
+#     also treats any pnpm-workspace.yaml as a workspace and fails with
+#     "packages field missing or empty" unless `packages` is non-empty, hence
+#     `- .` (this single package; not a monorepo).
+packages:
+  - .
+allowBuilds:
+  esbuild: true
+  sharp: false
+  workerd: true

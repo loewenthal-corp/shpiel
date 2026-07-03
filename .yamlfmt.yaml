@@ -1,6 +1,13 @@
 ---
 continue_on_error: true
 
+# website/pnpm-lock.yaml is pnpm-generated and must stay in pnpm's own
+# format. The `include_document_start` marker below makes pnpm v11 reject the
+# lockfile (ERR_PNPM_BROKEN_LOCKFILE), so yamlfmt must never touch it — no
+# matter how it is invoked (editor-on-save, `yamlfmt .`, pre-commit, etc.).
+exclude:
+  - website/pnpm-lock.yaml
+
 regex_exclude:
   - '# yamlfmt: ignore'
 
