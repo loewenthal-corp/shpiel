@@ -44,6 +44,8 @@ func TestParseRoute(t *testing.T) {
 		{"/org/name.git/info/lfs/objects", Route{}, false},   // truncated
 		{"/api/models/org/name/preupload", Route{}, false},   // missing revision
 		{"/api/models/org/name/commit/main/extra", Route{}, false},
+		{"/api/models/org/name/tree", Route{}, false}, // tree without revision
+		{"/api/models/gpt2/tree", Route{}, false},
 
 		// Non-routes.
 		{"/", Route{}, false},
