@@ -10,9 +10,12 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/loewenthal-corp/shpiel/internal/backend"
 	"github.com/loewenthal-corp/shpiel/internal/buildinfo"
@@ -342,6 +345,87 @@ func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
 		},
 		Orgs: []hfapi.WhoAmIOrg{},
 	})
+}
+
+// handleValidateYAML serves POST /api/validate-yaml, which huggingface_hub
+// calls before committing a README/model card: on 1.x it is
+// HfApi._validate_yaml — upload_folder and friends hit it whenever a
+// README.md is among the files — and on 0.x RepoCard.push_to_hub. The Hub
+// validates the card's YAML metadata block against its card schema;
+// Shpiel validates that the block parses as a YAML mapping — enough that
+// real cards pass and broken metadata fails.
+//
+// The response contract comes from HfApi._validate_yaml: a JSON body —
+// which the client parses unconditionally, on the 400 path too — with
+// "warnings" and "errors" lists of {"message": ...}; 200 means
+// committable, 400 means rejected. 1.x sends JSON {"repoType","content"};
+// 0.x releases form-encoded the same keys.
+func (s *Server) handleValidateYAML(w http.ResponseWriter, r *http.Request) {
+	var content string
+	body := http.MaxBytesReader(w, r.Body, maxInlineFileSize)
+	if strings.Contains(r.Header.Get("Content-Type"), "json") {
+		var req struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(body).Decode(&req); err != nil {
+			writeHFError(w, http.StatusBadRequest, hfapi.ErrorCodeBadRequest, "Invalid JSON body.")
+			return
+		}
+		content = req.Content
+	} else {
+		r.Body = body
+		if err := r.ParseForm(); err != nil {
+			writeHFError(w, http.StatusBadRequest, hfapi.ErrorCodeBadRequest, "Invalid form body.")
+			return
+		}
+		content = r.PostFormValue("content")
+	}
+
+	type note struct {
+		Message string `json:"message"`
+	}
+	resp := struct {
+		Warnings []note `json:"warnings"`
+		Errors   []note `json:"errors"`
+	}{Warnings: []note{}, Errors: []note{}}
+
+	warning, err := validateCardYAML(content)
+	if warning != "" {
+		resp.Warnings = append(resp.Warnings, note{Message: warning})
+	}
+	if err != nil {
+		resp.Errors = append(resp.Errors, note{Message: err.Error()})
+		w.Header().Set(hfapi.HeaderErrorCode, hfapi.ErrorCodeBadRequest)
+		writeJSON(w, http.StatusBadRequest, resp)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// cardYAMLBlock mirrors huggingface_hub's REGEX_YAML_BLOCK: the metadata
+// is a leading "---" line through the next "---" line.
+var cardYAMLBlock = regexp.MustCompile(`\A(\s*---[\r\n]+)([\S\s]*?)([\r\n]+---(?:\r\n|\n|\z))`)
+
+// validateCardYAML checks a card's metadata block: absent or empty
+// metadata is a warning (the Hub warns the same way), unparseable or
+// non-mapping metadata is an error.
+func validateCardYAML(content string) (warning string, err error) {
+	const emptyMetadata = "empty or missing yaml metadata in card"
+	m := cardYAMLBlock.FindStringSubmatch(content)
+	if m == nil {
+		return emptyMetadata, nil
+	}
+	var meta any
+	if err := yaml.Unmarshal([]byte(m[2]), &meta); err != nil {
+		return "", fmt.Errorf("invalid YAML in card metadata: %v", err)
+	}
+	if meta == nil {
+		return emptyMetadata, nil
+	}
+	if _, ok := meta.(map[string]any); !ok {
+		return "", fmt.Errorf("card metadata must be a YAML mapping, got %T", meta)
+	}
+	return "", nil
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {

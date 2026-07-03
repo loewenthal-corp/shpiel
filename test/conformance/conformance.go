@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -84,6 +85,7 @@ func Run(t *testing.T, baseURL string, fx Fixture) {
 	t.Run("ErrorRepoNotFound", c.errorRepoNotFound)
 	t.Run("ErrorRevisionNotFound", c.errorRevisionNotFound)
 	t.Run("ErrorEntryNotFound", c.errorEntryNotFound)
+	t.Run("ValidateYAML", c.validateYAML)
 }
 
 type checker struct {
@@ -464,4 +466,78 @@ func (c *checker) errorRevisionNotFound(t *testing.T) {
 
 func (c *checker) errorEntryNotFound(t *testing.T) {
 	c.assertError(t, c.url("/%s/resolve/main/no-such-file.bin", c.fx.Repo), http.StatusNotFound, hfapi.ErrorCodeEntryNotFound)
+}
+
+// validateYAML asserts the card pre-validation contract of
+// HfApi._validate_yaml (huggingface_hub 1.x, called by upload_folder when
+// a README.md is present; RepoCard.push_to_hub on 0.x): POST
+// /api/validate-yaml returns a JSON body with "warnings" and "errors"
+// lists of {"message"} — the client parses it unconditionally, even on
+// the 400 path, so a non-JSON body breaks uploads outright. 200 means
+// committable, 400 means rejected. 1.x sends JSON; releases before v0.24
+// form-encoded the same fields, so both dialects must hold.
+func (c *checker) validateYAML(t *testing.T) {
+	validCard := "---\nlicense: apache-2.0\ntags:\n  - conformance\n---\n\n# Model card\n"
+	brokenCard := "---\nlicense: [unclosed\n---\n"
+
+	type note struct {
+		Message string `json:"message"`
+	}
+	type validation struct {
+		Warnings []note `json:"warnings"`
+		Errors   []note `json:"errors"`
+	}
+	post := func(contentType string, body string) (int, validation) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, c.url("/api/validate-yaml"), strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", contentType)
+		resp, err := c.follow.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		payload, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v validation
+		if err := json.Unmarshal(payload, &v); err != nil {
+			t.Fatalf("validate-yaml response is not JSON (clients response.json() it even on 400): %v\n%s", err, payload)
+		}
+		return resp.StatusCode, v
+	}
+	asJSON := func(card string) string {
+		payload, _ := json.Marshal(map[string]string{"repoType": "model", "content": card})
+		return string(payload)
+	}
+	asForm := func(card string) string {
+		return url.Values{"repoType": {"model"}, "content": {card}}.Encode()
+	}
+
+	if status, v := post("application/json", asJSON(validCard)); status != http.StatusOK || len(v.Errors) != 0 {
+		t.Errorf("valid card (json) = %d %+v, want 200 with no errors", status, v)
+	}
+	if status, v := post("application/x-www-form-urlencoded", asForm(validCard)); status != http.StatusOK || len(v.Errors) != 0 {
+		t.Errorf("valid card (form) = %d %+v, want 200 with no errors", status, v)
+	}
+	// A card with no metadata block is committable; the Hub only warns.
+	if status, v := post("application/json", asJSON("# Just a readme\n")); status != http.StatusOK || len(v.Errors) != 0 {
+		t.Errorf("card without metadata = %d %+v, want 200 with no errors", status, v)
+	}
+
+	for name, card := range map[string]string{
+		"broken yaml": brokenCard,
+		"non-mapping": "---\n- just\n- a\n- list\n---\n",
+	} {
+		status, v := post("application/json", asJSON(card))
+		if status != http.StatusBadRequest {
+			t.Errorf("%s status = %d, want 400", name, status)
+		}
+		if len(v.Errors) == 0 || v.Errors[0].Message == "" {
+			t.Errorf("%s: 400 without errors[].message; clients join those into the ValueError text", name)
+		}
+	}
 }
