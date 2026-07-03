@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/loewenthal-corp/shpiel/internal/audit"
+	"github.com/loewenthal-corp/shpiel/internal/backend"
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
 )
 
@@ -242,7 +244,7 @@ func (s *Service) HandleShardUpload(w http.ResponseWriter, r *http.Request) {
 		if err := s.materialize(r.Context(), claims.Kind, repo, rec); err != nil {
 			s.log.ErrorContext(r.Context(), "xet materialization failed",
 				"file", rec.FileHash, "sha256", rec.SHA256, "error", err)
-			writeCASError(w, http.StatusBadRequest, fmt.Sprintf("materializing %s: %v", rec.FileHash, err))
+			writeCASError(w, materializeStatus(err), fmt.Sprintf("materializing %s: %v", rec.FileHash, err))
 			return
 		}
 		s.log.InfoContext(r.Context(), "xet file registered",
@@ -271,6 +273,18 @@ func recordFromShardFile(f *ShardFile) *FileRecord {
 		})
 	}
 	return rec
+}
+
+// materializeStatus maps a materialization failure onto the CAS response:
+// a shard referencing xorbs the client never uploaded, or whose content
+// fails its declared sha256, is the client's fault (400); everything else
+// is Shpiel or its backend failing, and must be a 500 so infrastructure
+// trouble is not reported as a bad shard.
+func materializeStatus(err error) int {
+	if errors.Is(err, ErrNotFound) || errors.Is(err, backend.ErrDigestMismatch) {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
 }
 
 // materialize reconstructs a file from its terms and streams it into the
