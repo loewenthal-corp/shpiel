@@ -55,11 +55,38 @@ jobs:
         env:
           SHPIEL_E2E_REQUIRE: "1"
 
+  mutation:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          # Full history so the pull-request base commit is available to diff.
+          fetch-depth: 0
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+        with:
+          cache: "true"
+
+      - name: Mutation-test changed code (gates on a surviving mutant)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -z "$BASE_SHA" ]; then
+            echo "not a pull_request; nothing to diff — skipping."
+            exit 0
+          fi
+          task mutation:diff BASE="$BASE_SHA"
+
   check:
     if: always()
     needs:
       - do
       - e2e
+      - mutation
     runs-on: ubuntu-24.04
     permissions: {}
     steps:

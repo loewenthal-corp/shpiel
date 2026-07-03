@@ -47,14 +47,20 @@ accept manifests before blobs (staging) and link/promote as blobs arrive.
 
 ```sh
 source bin/activate-hermit   # or direnv allow
-task do                      # generate + format + lint + test + build
+task do                      # generate + format + lint + test + build + mutation:diff
 task test                    # just Go tests
 task e2e                     # real huggingface_hub client in Docker vs shpiel
+task mutation                # mutation-test the whole module (gremlins; slow)
 task dev                     # tilt up (needs a local k8s cluster)
 ```
 
-CI runs `task do`, `task test:full` (race), `task e2e`, and fails on
-uncommitted generated files.
+`task do` ends with `mutation:diff`: gremlins mutation testing scoped to
+code changed vs `main`, which fails if a mutant survives (a bug in that
+line no test would catch). It no-ops when nothing Go changed; bypass a
+false positive on an equivalent mutant with `SKIP_MUTATION=1 task do`.
+
+CI runs `task do`, `task test:full` (race), `task e2e`, the same mutation
+gate on the PR diff, and fails on uncommitted generated files.
 
 ## The testing story (read this before changing the API surface)
 
