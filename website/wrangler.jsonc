@@ -1,0 +1,25 @@
+// Cloudflare Workers config for shpiel.dev.
+//
+// The worker server-renders the pages (so GitHub stars / releases /
+// changelog are fetched at the edge, not in the browser); everything in
+// public/ is served as static assets.
+//
+// The custom_domain routes require the shpiel.dev zone to exist in the
+// Cloudflare account the deploy token belongs to; `wrangler deploy`
+// attaches the domains automatically.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "shpiel-website",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "./public"
+  },
+  "routes": [
+    { "pattern": "shpiel.dev", "custom_domain": true },
+    { "pattern": "www.shpiel.dev", "custom_domain": true }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
