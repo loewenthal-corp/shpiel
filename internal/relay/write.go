@@ -115,13 +115,27 @@ func (r *Relay) PutLFSBlob(ctx context.Context, kind hfapi.RepoKind, repo hfapi.
 		return fmt.Errorf("%w: %s", ErrNoRoute, repo)
 	}
 	bk := route.Primary
-	if err := bk.PutBlob(ctx, kind, repo, backend.SHA256Digest(oid), body, size); err != nil {
+	// Count what actually flowed: size may be -1 (unsized PUT), and a
+	// negative value must never reach the counter (it panics).
+	cr := &countingReader{r: body}
+	if err := bk.PutBlob(ctx, kind, repo, backend.SHA256Digest(oid), cr, size); err != nil {
 		return err
 	}
 	if r.metrics != nil {
-		r.metrics.UploadBytes.WithLabelValues(bk.Name()).Add(float64(size))
+		r.metrics.UploadBytes.WithLabelValues(bk.Name()).Add(float64(cr.n))
 	}
 	return nil
+}
+
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
 }
 
 // CommitOps is a parsed commit payload.
