@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/loewenthal-corp/shpiel/compare/v0.1.0...v0.1.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* give HTTP clients private transports ([0d381ca](https://github.com/loewenthal-corp/shpiel/commit/0d381ca35aa29496a2ea8f29260edb8b0cc1b185))
+* zot-compatible chunked blob commits, /api/validate-yaml, xet error mapping ([#21](https://github.com/loewenthal-corp/shpiel/issues/21)) ([8171ff1](https://github.com/loewenthal-corp/shpiel/commit/8171ff14e013ceac581c18a58664a1e069a99d4c))
+
 ## [0.1.0](https://github.com/loewenthal-corp/shpiel/compare/v0.0.1...v0.1.0) (2026-07-02)
 
 
