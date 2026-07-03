@@ -260,10 +260,10 @@ func TestRunLifecycle(t *testing.T) {
 	}
 
 	// The metrics listener answers on its own port.
-	if h.server.metricsListener == nil {
+	if h.server.MetricsAddr() == "" {
 		t.Fatal("metrics listener never bound")
 	}
-	resp, err = http.Get("http://" + h.server.metricsListener.Addr().String() + "/metrics")
+	resp, err = http.Get("http://" + h.server.MetricsAddr() + "/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}

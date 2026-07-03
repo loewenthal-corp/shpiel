@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -47,6 +48,9 @@ type Server struct {
 	downloadSem chan struct{}
 	uploadSem   chan struct{}
 
+	// listenerMu guards the listeners: Run binds them while APIAddr (and
+	// callers polling for readiness) read from other goroutines.
+	listenerMu      sync.Mutex
 	apiListener     net.Listener
 	metricsListener net.Listener
 }
@@ -213,11 +217,13 @@ func routeFrom(r *http.Request) hfapi.Route {
 
 // Run serves until ctx is canceled, then drains gracefully.
 func (s *Server) Run(ctx context.Context) error {
-	var err error
-	s.apiListener, err = net.Listen("tcp", s.cfg.Listen.API)
+	apiLn, err := net.Listen("tcp", s.cfg.Listen.API)
 	if err != nil {
 		return fmt.Errorf("server: listening on %s: %w", s.cfg.Listen.API, err)
 	}
+	s.listenerMu.Lock()
+	s.apiListener = apiLn
+	s.listenerMu.Unlock()
 	api := &http.Server{
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 30 * time.Second,
@@ -226,21 +232,24 @@ func (s *Server) Run(ctx context.Context) error {
 
 	servers := []*http.Server{api}
 	errCh := make(chan error, 3)
-	go func() { errCh <- api.Serve(s.apiListener) }()
-	s.log.Info("api listening", "addr", s.apiListener.Addr().String())
+	go func() { errCh <- api.Serve(apiLn) }()
+	s.log.Info("api listening", "addr", apiLn.Addr().String())
 
 	if s.cfg.Listen.Metrics != "" {
-		s.metricsListener, err = net.Listen("tcp", s.cfg.Listen.Metrics)
+		metricsLn, err := net.Listen("tcp", s.cfg.Listen.Metrics)
 		if err != nil {
 			_ = api.Close()
 			return fmt.Errorf("server: listening on %s: %w", s.cfg.Listen.Metrics, err)
 		}
+		s.listenerMu.Lock()
+		s.metricsListener = metricsLn
+		s.listenerMu.Unlock()
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("GET /metrics", promhttp.HandlerFor(s.metrics.Registry, promhttp.HandlerOpts{}))
 		mSrv := &http.Server{Handler: metricsMux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, mSrv)
-		go func() { errCh <- mSrv.Serve(s.metricsListener) }()
-		s.log.Info("metrics listening", "addr", s.metricsListener.Addr().String())
+		go func() { errCh <- mSrv.Serve(metricsLn) }()
+		s.log.Info("metrics listening", "addr", metricsLn.Addr().String())
 	}
 
 	if s.cfg.Listen.Admin != "" {
@@ -281,8 +290,21 @@ func (s *Server) Run(ctx context.Context) error {
 
 // APIAddr returns the bound API address once Run has started listening.
 func (s *Server) APIAddr() string {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
 	if s.apiListener == nil {
 		return ""
 	}
 	return s.apiListener.Addr().String()
+}
+
+// MetricsAddr returns the bound metrics address once Run has started
+// listening; "" when no metrics listener is configured or bound yet.
+func (s *Server) MetricsAddr() string {
+	s.listenerMu.Lock()
+	defer s.listenerMu.Unlock()
+	if s.metricsListener == nil {
+		return ""
+	}
+	return s.metricsListener.Addr().String()
 }
