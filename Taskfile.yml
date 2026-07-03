@@ -19,6 +19,9 @@ vars:
   BUILD_TIME:
     sh: date -u +%Y-%m-%dT%H:%M:%SZ
   LDFLAGS: "-X github.com/loewenthal-corp/shpiel/internal/buildinfo.Commit={{.GIT_COMMIT}} -X github.com/loewenthal-corp/shpiel/internal/buildinfo.BuildTime={{.BUILD_TIME}}"
+  # Mutation-testing tool, pinned. Not a hermit package, so it is run via
+  # `go run` on the hermit-pinned toolchain (keeps it out of go.mod).
+  GREMLINS: "github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0"
 
 tasks:
   do:
@@ -29,6 +32,9 @@ tasks:
       - task: lint
       - task: test
       - task: build
+      # Mutation-test only what changed vs main, so a weak spot is caught
+      # here (pre-push) instead of in CI. No-op when nothing Go changed.
+      - task: mutation:diff
 
   init:
     desc: "Download Go module dependencies"
@@ -111,6 +117,70 @@ tasks:
     cmds:
       - go test -coverprofile=coverage.out ./...
       - go tool cover -html=coverage.out -o coverage.html
+
+  mutation:
+    desc: "Mutation-test the whole module with gremlins (slow; informational)"
+    aliases: [mut]
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go run {{.GREMLINS}} unleash {{.CLI_ARGS}}
+
+  mutation:diff:
+    desc: "Mutation-test only code changed vs main; fails on a surviving mutant"
+    aliases: [mutd]
+    dir: "{{.TASKFILE_DIR}}"
+    vars:
+      BASE: ""
+    cmds:
+      # gremlins --diff scopes to changed lines, but an *empty* diff makes it
+      # fall back to the whole module — so skip explicitly when nothing (that
+      # gremlins would mutate) changed. Excludes here mirror .gremlins.yaml.
+      - |
+        if [ -n "$SKIP_MUTATION" ]; then
+          echo "mutation:diff: SKIP_MUTATION set; skipping."
+          exit 0
+        fi
+        # A shallow clone (e.g. the CI `do` job's default checkout) can't
+        # produce a reliable diff — gremlins would fall back to the whole
+        # module. The dedicated CI mutation job fetches full history.
+        if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+          echo "mutation:diff: shallow clone; skipping (need full history to diff)."
+          exit 0
+        fi
+        base='{{.BASE}}'
+        if [ -z "$base" ]; then
+          if git rev-parse --verify --quiet main >/dev/null 2>&1; then
+            base=main
+          elif git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+            base=origin/main
+          fi
+        fi
+        if [ -z "$base" ] || ! git rev-parse --verify --quiet "$base" >/dev/null 2>&1; then
+          echo "mutation:diff: no base ref to diff against; skipping."
+          exit 0
+        fi
+        changed=$(git diff --name-only "$base" -- '*.go' \
+          | grep -vE '(_test\.go$|^test/conformance/|^internal/fakehub/|^internal/fakeregistry/|^cmd/fakehub/)' || true)
+        if [ -z "$changed" ]; then
+          echo "mutation:diff: no production Go changes vs $base; skipping."
+          exit 0
+        fi
+        echo "mutation:diff: mutating lines changed vs $base ..."
+        out=$(go run {{.GREMLINS}} unleash --diff "$base" 2>&1)
+        rc=$?
+        printf '%s\n' "$out"
+        if [ "$rc" -ne 0 ]; then
+          echo "mutation:diff: gremlins exited $rc"
+          exit "$rc"
+        fi
+        if printf '%s\n' "$out" | grep -qE '(^|[[:space:]])LIVED '; then
+          echo
+          echo "mutation gate FAILED: a mutant survived in changed code (see LIVED above)."
+          echo "Add or strengthen a test to kill it. For a known-equivalent mutant,"
+          echo "adjust the code, or bypass once with: SKIP_MUTATION=1 task do"
+          exit 1
+        fi
+        echo "mutation:diff: all mutants in changed code were caught."
 
   e2e:
     desc: "Run end-to-end tests (real huggingface_hub client in Docker against shpiel)"

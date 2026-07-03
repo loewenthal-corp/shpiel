@@ -1,0 +1,13 @@
+---
+# Gremlins mutation-testing config (https://gremlins.dev).
+#
+# Run locally with `task mutation` (whole module) or `task mutation:diff`
+# (only code changed vs main, which is also what `task do` and CI run).
+unleash:
+  # Test scaffolding and in-repo fakes are not shipped code; mutating them
+  # is noise (and slow), so keep mutation focused on production packages.
+  exclude-files:
+    - "test/conformance/"
+    - "internal/fakehub/"
+    - "internal/fakeregistry/"
+    - "cmd/fakehub/"
