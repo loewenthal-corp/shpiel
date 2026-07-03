@@ -31,17 +31,23 @@ def check(name, cond, detail=""):
     print(f"ok {name}")
 
 
-# --- Fixture folder: small text (inline), big binary (LFS), nested file ---
+# --- Fixture folder: small text (inline), big binary (LFS), nested file,
+# and a model card. The weights are 9 MiB on purpose: LFS blobs at or
+# above ociclient's 8 MiB chunk size take the chunked-commit path, which
+# once 416'd against real Zot while 1 MiB uploads sailed through.
 os.makedirs("/tmp/upload/vae", exist_ok=True)
 config = b'{"model_type":"uploaded","hidden_size":64}'
-weights = bytes((i * 7 + 3) % 256 for i in range(1 << 20))  # 1 MiB
+weights = bytes((i * 7 + 3) % 256 for i in range(9 << 20))  # 9 MiB
 nested = b'{"vae":true,"scale":0.5}'
+readme = b"---\nlicense: apache-2.0\ntags:\n  - e2e\n---\n\n# e2e model\n"
 with open("/tmp/upload/config.json", "wb") as f:
     f.write(config)
 with open("/tmp/upload/model.safetensors", "wb") as f:
     f.write(weights)
 with open("/tmp/upload/vae/config.json", "wb") as f:
     f.write(nested)
+with open("/tmp/upload/README.md", "wb") as f:
+    f.write(readme)
 
 # 1. Repo creation (idempotent with exist_ok).
 url = api.create_repo(REPO, exist_ok=True)
@@ -56,7 +62,11 @@ check("upload_folder.oid", bool(info.oid), info)
 # 3. Metadata reflects the push.
 mi = api.model_info(REPO)
 names = {s.rfilename for s in mi.siblings}
-check("siblings", names == {"config.json", "model.safetensors", "vae/config.json"}, names)
+check(
+    "siblings",
+    names == {"config.json", "model.safetensors", "vae/config.json", "README.md"},
+    names,
+)
 check("model_info.sha", mi.sha == info.oid, f"{mi.sha} != {info.oid}")
 
 # 4. Bytes round-trip through the read path.
@@ -64,6 +74,7 @@ for path, want in [
     ("config.json", config),
     ("model.safetensors", weights),
     ("vae/config.json", nested),
+    ("README.md", readme),
 ]:
     local = hf_hub_download(repo_id=REPO, filename=path)
     with open(local, "rb") as f:
@@ -80,7 +91,34 @@ api.delete_file(path_in_repo="vae/config.json", repo_id=REPO, commit_message="rm
 mi = api.model_info(REPO)
 check("delete_file", "vae/config.json" not in {s.rfilename for s in mi.siblings})
 
-# 7. The hf CLI upload — the literal M1 exit criterion shape.
+# 7. Card pre-validation. upload_folder already called it implicitly for
+# README.md (HfApi._validate_yaml); this exercises the rejection path,
+# which no successful upload ever sends. The response must be JSON with
+# warnings/errors lists — the client response.json()s it even on 400.
+# get_session() is the client's own HTTP session (httpx on 1.x, requests
+# on 0.x), so this stays import-compatible with both.
+from huggingface_hub.utils import get_session  # noqa: E402
+
+r = get_session().post(
+    f"{ENDPOINT}/api/validate-yaml",
+    json={"repoType": "model", "content": readme.decode()},
+)
+check(
+    "validate_yaml.ok",
+    r.status_code == 200 and r.json().get("errors") == [],
+    f"{r.status_code}: {r.text[:200]}",
+)
+r = get_session().post(
+    f"{ENDPOINT}/api/validate-yaml",
+    json={"repoType": "model", "content": "---\nlicense: [unclosed\n---\n"},
+)
+check(
+    "validate_yaml.rejects",
+    r.status_code == 400 and r.json()["errors"][0]["message"] != "",
+    f"{r.status_code}: {r.text[:200]}",
+)
+
+# 8. The hf CLI upload — the literal M1 exit criterion shape.
 with open("/tmp/extra.safetensors", "wb") as f:
     f.write(bytes((i * 13 + 1) % 256 for i in range(64 << 10)))
 cli = subprocess.run(

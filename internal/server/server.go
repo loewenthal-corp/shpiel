@@ -131,6 +131,9 @@ func releaseSlot(sem chan struct{}) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/whoami-v2", s.instrument("whoami", s.handleWhoAmI))
+	// Unauthenticated by design: huggingface_hub's RepoCard.push_to_hub
+	// posts here without credentials before committing a model card.
+	mux.HandleFunc("POST /api/validate-yaml", s.instrument("validate_yaml", s.handleValidateYAML))
 	mux.HandleFunc("POST /api/repos/create", s.instrument("repo_create", s.handleCreateRepo))
 	mux.HandleFunc("DELETE /api/repos/delete", s.instrument("repo_delete", s.handleDeleteRepo))
 	// The LFS upload href minted by the batch API; "shpiel-lfs" is a

@@ -13,9 +13,17 @@ import (
 // (xorbs + shard), files materialize into the backend for regular HTTP
 // consumers, and downloads reconstruct chunk-level through the
 // reconstruction API.
+//
+// The backend is a real Zot in tar-layers format — the cluster
+// configuration where >8 MiB materializations once died in the OCI
+// chunked-commit path (416 BLOB_UPLOAD_INVALID); the fs backend cannot
+// see that class of failure.
 func TestXetUploadAndChunkDownload(t *testing.T) {
 	requireDocker(t)
 	repoRoot := repoRoot(t)
+
+	zotPort := freePort(t)
+	startZot(t, zotPort)
 
 	sh := startShpielWithConfig(t, repoRoot, func(apiPort, metricsPort int) string {
 		return fmt.Sprintf(`---
@@ -23,19 +31,20 @@ listen:
   api: "0.0.0.0:%d"
   metrics: "127.0.0.1:%d"
 backends:
-  cache:
-    type: fs
-    path: %s
+  zot:
+    type: oci
+    url: http://127.0.0.1:%d
+    format: tar-layers
 routes:
   - match: "*"
-    primary: cache
+    primary: zot
 xet:
   enabled: true
   data_dir: %s
 log:
   level: debug
   format: text
-`, apiPort, metricsPort, t.TempDir(), t.TempDir())
+`, apiPort, metricsPort, zotPort, t.TempDir())
 	})
 	buildClientImage(t, repoRoot)
 

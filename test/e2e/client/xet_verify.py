@@ -41,8 +41,10 @@ check("hf_xet_available", xet_importable and not os.environ.get("HF_HUB_DISABLE_
 
 # --- Fixture: big-enough binary files that the xet pipeline chunks them ---
 os.makedirs("/tmp/xet-upload", exist_ok=True)
-# ~3 MiB of structured-but-not-constant data: chunks well, several CDC chunks.
-weights = bytes((i * 31 + (i >> 8)) % 256 for i in range(3 << 20))
+# 9 MiB of structured-but-not-constant data: chunks well (many CDC chunks),
+# and materialization into the OCI backend crosses ociclient's 8 MiB
+# chunk-upload boundary — the size class that once 416'd against Zot.
+weights = bytes((i * 31 + (i >> 8)) % 256 for i in range(9 << 20))
 config = b'{"model_type":"xet-e2e","hidden_size":128}'
 with open("/tmp/xet-upload/model.safetensors", "wb") as f:
     f.write(weights)

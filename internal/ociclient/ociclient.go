@@ -295,10 +295,29 @@ func (c *Client) getBlobAttempt(ctx context.Context, repo, digest string, offset
 	}
 }
 
-// PutBlob uploads a blob with a known digest. size < 0 streams chunked.
+// PutBlob uploads a blob with a known digest. size < 0 streams through a
+// chunked upload session: registries require Content-Length or
+// Content-Range on upload requests, so there is no unsized monolithic PUT.
 // Idempotent: existing blobs are not re-uploaded.
 func (c *Client) PutBlob(ctx context.Context, repo, digest string, content io.Reader, size int64) error {
 	if _, err := c.HeadBlob(ctx, repo, digest); err == nil {
+		return nil
+	}
+	if size < 0 {
+		w, err := c.NewBlobWriter(ctx, repo)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(w, content); err != nil {
+			return err
+		}
+		got, _, err := w.Commit()
+		if err != nil {
+			return err
+		}
+		if got != digest {
+			return fmt.Errorf("ociclient: PUT blob %s: content hashed to %s", digest, got)
+		}
 		return nil
 	}
 	location, err := c.startUpload(ctx, repo)
@@ -410,16 +429,28 @@ func (w *BlobWriter) flush() error {
 }
 
 // Commit finalizes the upload and returns the digest and total size.
+//
+// The closing PUT never mixes forms: a session with no chunks PATCHed yet
+// completes monolithically (the whole payload as the PUT body), while a
+// chunked session gets its tail PATCHed like every other chunk and a
+// bodyless PUT. Registries — Zot among them — read a data-carrying PUT
+// without Content-Range as a monolithic upload starting at offset 0 and
+// reject it (416 BLOB_UPLOAD_INVALID) once chunks are in the session.
 func (w *BlobWriter) Commit() (string, int64, error) {
 	digest := "sha256:" + hex.EncodeToString(w.hasher.Sum(nil))
 	total := w.offset + int64(w.buf.Len())
 
-	// The final PUT carries any remaining buffered bytes.
+	var tail []byte
+	if w.offset == 0 {
+		tail = w.buf.Bytes()
+	} else if err := w.flush(); err != nil {
+		return "", 0, err
+	}
+
 	u, err := appendDigestParam(w.location, digest)
 	if err != nil {
 		return "", 0, err
 	}
-	tail := w.buf.Bytes()
 	req, err := http.NewRequestWithContext(w.ctx, http.MethodPut, u, bytes.NewReader(tail))
 	if err != nil {
 		return "", 0, err

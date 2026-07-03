@@ -132,8 +132,8 @@ export function homePage(stars: number | null, latest: Release | null): string {
   const content = `
 <section class="hero wrap">
   ${releasePill}
-  <h1>An <mark>HF&#8209;compatible</mark> model&nbsp;relay.</h1>
-  <p class="lead">Shpiel speaks the Hugging Face Hub API — read, write, and Xet — and stores models in the infrastructure your cluster already runs: OCI registries and filesystems today, object storage next. Every existing HF tool works unchanged.</p>
+  <h1>Hugging&nbsp;Face in, <mark>OCI&nbsp;artifacts</mark> out.</h1>
+  <p class="lead">Shpiel speaks the Hugging Face Hub API — read, write, and Xet — so push_to_hub() lands weights as versioned, content-addressed OCI artifacts in the registry your cluster already runs. Every existing HF tool works unchanged.</p>
   <pre><code><span class="c"># the whole integration:</span>
 export HF_ENDPOINT=https://shpiel.internal
 
@@ -214,9 +214,9 @@ hf upload my-org/my-model ./model</code></pre>
 
   return layout(
     {
-      title: "Shpiel — an HF-compatible model relay",
+      title: "Shpiel — push Hugging Face models into your OCI registry",
       description:
-        "Shpiel speaks the Hugging Face Hub API — read, write, and Xet — and stores models in OCI registries and filesystems your cluster already runs. Every HF tool works unchanged.",
+        "Shpiel speaks the Hugging Face Hub API — read, write, and Xet — and lands models as OCI artifacts in the registry your cluster already runs. Every HF tool works unchanged.",
       path: "/",
       stars,
     },

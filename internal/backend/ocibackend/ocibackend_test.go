@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/loewenthal-corp/shpiel/internal/backend"
 	"github.com/loewenthal-corp/shpiel/internal/fakehub"
+	"github.com/loewenthal-corp/shpiel/internal/fakeregistry"
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
 )
 
@@ -24,6 +26,21 @@ func newTestBackend(t *testing.T, format string) *Backend {
 	srv := httptest.NewServer(ggcrregistry.New(ggcrregistry.Logger(log.New(io.Discard, "", 0))))
 	t.Cleanup(srv.Close)
 	b, err := New("test-oci", Options{URL: srv.URL, Format: format})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// newStrictBackend runs against internal/fakeregistry, which reproduces
+// Zot's strict upload-session semantics. Both registries stay in the
+// suite: ggcr's is lenient where Zot is strict, so only this one would
+// have caught the chunked-commit 416.
+func newStrictBackend(t *testing.T, format string) *Backend {
+	t.Helper()
+	srv := httptest.NewServer(fakeregistry.New())
+	t.Cleanup(srv.Close)
+	b, err := New("test-oci-strict", Options{URL: srv.URL, Format: format})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +70,7 @@ func manifestFor(repo string, commit string, files map[string][]byte) *backend.M
 
 // testRoundtrip drives the full lifecycle for one format: blobs first,
 // manifest, refs, reads with seeking.
-func testRoundtrip(t *testing.T, format string) {
-	b := newTestBackend(t, format)
+func testRoundtrip(t *testing.T, b *Backend) {
 	ctx := context.Background()
 	repo, _ := hfapi.ParseRepoID("Org/Model.Name") // exercises lowercasing
 
@@ -120,14 +136,72 @@ func testRoundtrip(t *testing.T, format string) {
 	}
 }
 
-func TestRoundtripModelPack(t *testing.T) { t.Parallel(); testRoundtrip(t, FormatModelPack) }
-func TestRoundtripTarLayers(t *testing.T) { t.Parallel(); testRoundtrip(t, FormatTarLayers) }
+func TestRoundtripModelPack(t *testing.T) {
+	t.Parallel()
+	testRoundtrip(t, newTestBackend(t, FormatModelPack))
+}
+func TestRoundtripTarLayers(t *testing.T) {
+	t.Parallel()
+	testRoundtrip(t, newTestBackend(t, FormatTarLayers))
+}
+func TestRoundtripModelPackStrict(t *testing.T) {
+	t.Parallel()
+	testRoundtrip(t, newStrictBackend(t, FormatModelPack))
+}
+func TestRoundtripTarLayersStrict(t *testing.T) {
+	t.Parallel()
+	testRoundtrip(t, newStrictBackend(t, FormatTarLayers))
+}
+
+// TestLargeBlobCrossesChunkBoundary is the cluster regression: LFS
+// uploads and Xet materializations of 8 MiB and up cross ociclient's
+// chunk size, and committing them to Zot died with 416
+// BLOB_UPLOAD_INVALID. 8 MiB exactly reproduces the reported failure;
+// the odd extra reproduces the every-larger-upload case.
+func TestLargeBlobCrossesChunkBoundary(t *testing.T) {
+	t.Parallel()
+	for _, format := range []string{FormatModelPack, FormatTarLayers} {
+		for _, size := range []int{8 << 20, 8<<20 + 4097} {
+			t.Run(fmt.Sprintf("%s-%d", format, size), func(t *testing.T) {
+				t.Parallel()
+				b := newStrictBackend(t, format)
+				ctx := context.Background()
+				repo, _ := hfapi.ParseRepoID("org/large")
+
+				payload := make([]byte, size)
+				for i := range payload {
+					payload[i] = byte(i*31 + i>>10)
+				}
+				digest := backend.SHA256Digest(fakehub.SHA256Hex(payload))
+				if err := b.PutBlob(ctx, hfapi.RepoKindModel, repo, digest, bytes.NewReader(payload), int64(size)); err != nil {
+					t.Fatalf("PutBlob(%d bytes): %v", size, err)
+				}
+
+				info, err := b.StatBlob(ctx, hfapi.RepoKindModel, repo, digest)
+				if err != nil || info.Size != int64(size) {
+					t.Fatalf("StatBlob = %+v, %v", info, err)
+				}
+				rc, err := b.OpenBlob(ctx, hfapi.RepoKindModel, repo, digest)
+				if err != nil {
+					t.Fatalf("OpenBlob: %v", err)
+				}
+				defer rc.Close()
+				got, err := io.ReadAll(rc)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(got, payload) {
+					t.Fatalf("read back %d bytes, want %d (content mismatch)", len(got), len(payload))
+				}
+			})
+		}
+	}
+}
 
 // TestStagingPromote covers the pull-through order: manifest first (blobs
 // missing => staged), blobs trickle in, and the final blob promotes the
 // commit to its real tags.
-func testStagingPromote(t *testing.T, format string) {
-	b := newTestBackend(t, format)
+func testStagingPromote(t *testing.T, b *Backend) {
 	ctx := context.Background()
 	repo, _ := hfapi.ParseRepoID("org/staged")
 
@@ -174,8 +248,22 @@ func testStagingPromote(t *testing.T, format string) {
 	}
 }
 
-func TestStagingPromoteModelPack(t *testing.T) { t.Parallel(); testStagingPromote(t, FormatModelPack) }
-func TestStagingPromoteTarLayers(t *testing.T) { t.Parallel(); testStagingPromote(t, FormatTarLayers) }
+func TestStagingPromoteModelPack(t *testing.T) {
+	t.Parallel()
+	testStagingPromote(t, newTestBackend(t, FormatModelPack))
+}
+func TestStagingPromoteTarLayers(t *testing.T) {
+	t.Parallel()
+	testStagingPromote(t, newTestBackend(t, FormatTarLayers))
+}
+func TestStagingPromoteModelPackStrict(t *testing.T) {
+	t.Parallel()
+	testStagingPromote(t, newStrictBackend(t, FormatModelPack))
+}
+func TestStagingPromoteTarLayersStrict(t *testing.T) {
+	t.Parallel()
+	testStagingPromote(t, newStrictBackend(t, FormatTarLayers))
+}
 
 func TestRepoLifecycle(t *testing.T) {
 	t.Parallel()
