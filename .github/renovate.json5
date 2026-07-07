@@ -6,6 +6,19 @@
   ],
   "packageRules": [
     {
+      // The chart's own image: values.yaml deliberately ships tag: ""
+      // (it follows the chart's appVersion, which release-please bumps).
+      // Renovate's pinDigests otherwise rewrites it to "@sha256:...",
+      // which renders the malformed ghcr.io/...:@sha256:... reference.
+      "matchManagers": [
+        "helm-values"
+      ],
+      "matchPackageNames": [
+        "ghcr.io/loewenthal-corp/shpiel"
+      ],
+      "enabled": false
+    },
+    {
       "matchManagers": [
         "github-actions"
       ],
