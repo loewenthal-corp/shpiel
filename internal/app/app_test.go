@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/loewenthal-corp/shpiel/internal/config"
 	"github.com/loewenthal-corp/shpiel/internal/fakehub"
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
+	"github.com/loewenthal-corp/shpiel/internal/s3client"
 )
 
 func validConfig(t *testing.T) config.Config {
@@ -71,10 +74,62 @@ func TestBuildWiresS3Backend(t *testing.T) {
 	}
 }
 
-func TestEnvOr(t *testing.T) {
-	t.Parallel()
-	if envOr("", "FALLBACK") != "FALLBACK" || envOr("SET", "FALLBACK") != "SET" {
-		t.Error("envOr precedence wrong")
+// TestS3CredentialsProviderChain pins the resolution order: explicit
+// static keys, then ambient web identity (IRSA), then anonymous.
+func TestS3CredentialsProviderChain(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("tok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, env := range []string{
+		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+		"AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN", "AWS_ROLE_SESSION_NAME", "AWS_ENDPOINT_URL_STS",
+	} {
+		t.Setenv(env, "")
+	}
+
+	// Nothing set: anonymous.
+	p, err := s3CredentialsProvider(config.BackendAuth{}, "us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creds, _ := p.Credentials(context.Background()); !creds.IsZero() {
+		t.Errorf("empty environment yielded credentials %+v", creds)
+	}
+
+	// Web identity env vars present: the IRSA provider.
+	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenFile)
+	t.Setenv("AWS_ROLE_ARN", "arn:aws:iam::123:role/shpiel")
+	p, err = s3CredentialsProvider(config.BackendAuth{}, "us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.(*s3client.WebIdentityProvider); !ok {
+		t.Errorf("web identity env yielded %T, want *s3client.WebIdentityProvider", p)
+	}
+
+	// Static keys win over web identity.
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIDSTATIC")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "sekrit")
+	p, err = s3CredentialsProvider(config.BackendAuth{}, "us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds, _ := p.Credentials(context.Background())
+	if creds.AccessKeyID != "AKIDSTATIC" {
+		t.Errorf("static keys did not win: %+v", creds)
+	}
+
+	// Configured env names take precedence over the AWS defaults.
+	t.Setenv("CUSTOM_KEY", "AKIDCUSTOM")
+	t.Setenv("CUSTOM_SECRET", "custom-secret")
+	p, err = s3CredentialsProvider(config.BackendAuth{AccessKeyIDEnv: "CUSTOM_KEY", SecretAccessKeyEnv: "CUSTOM_SECRET"}, "us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds, _ = p.Credentials(context.Background())
+	if creds.AccessKeyID != "AKIDCUSTOM" {
+		t.Errorf("configured env names did not win: %+v", creds)
 	}
 }
 

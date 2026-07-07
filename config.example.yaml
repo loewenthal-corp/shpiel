@@ -43,9 +43,11 @@ backends:
   #     auth: { username_env: ZOT_USER, password_env: ZOT_PASS }
   # S3-compatible object storage (AWS S3, GCS interop, MinIO, Ceph, R2):
   # content-addressed blobs plus manifest/ref objects under
-  # [prefix/]models/org/name/. Credentials come from the named env vars,
-  # falling back to AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
-  # AWS_SESSION_TOKEN; requests go unsigned when those are empty too.
+  # [prefix/]models/org/name/. Credentials resolve like the AWS SDK
+  # chain: the named env vars (falling back to AWS_ACCESS_KEY_ID /
+  # AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN), then ambient web
+  # identity when AWS_WEB_IDENTITY_TOKEN_FILE + AWS_ROLE_ARN are present
+  # (EKS IRSA — no static keys in the pod), then unsigned.
   #   archive:
   #     type: s3
   #     bucket: models-archive

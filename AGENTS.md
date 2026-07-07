@@ -26,7 +26,8 @@ internal/relay      backend-first reads; pull-through on miss (singleflight);
    │                                 reads, chunked streaming uploads)
    ├── internal/backend/s3backend    S3-compatible buckets (AWS/GCS/MinIO/R2):
    │      │                          blob/manifest/ref objects, spool-verified PUTs
-   │      └── internal/s3client      minimal S3 REST client, hand-rolled SigV4
+   │      └── internal/s3client      minimal S3 REST client, hand-rolled SigV4,
+   │                                 static or IRSA web-identity credentials
    │                                 (fakes3 is its strict in-process test double)
    ├── internal/xet                  Xet protocol server: CAS API (xorb/shard
    │                                 ingest + reconstruction), format parsers,

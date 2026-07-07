@@ -47,10 +47,9 @@ type Options struct {
 	Region string
 	// Prefix is prepended to every key, for sharing a bucket.
 	Prefix string
-	// Credentials are static AWS-style credentials; zero means anonymous.
-	AccessKeyID     string
-	SecretAccessKey string
-	SessionToken    string
+	// Credentials supplies request credentials (static or rotating web
+	// identity); nil means anonymous.
+	Credentials s3client.CredentialsProvider
 }
 
 // Backend implements backend.Backend on a bucket.
@@ -68,11 +67,7 @@ func New(name string, opts Options) (*Backend, error) {
 		Endpoint: opts.Endpoint,
 		Bucket:   opts.Bucket,
 		Region:   opts.Region,
-		Credentials: s3client.Credentials{
-			AccessKeyID:     opts.AccessKeyID,
-			SecretAccessKey: opts.SecretAccessKey,
-			SessionToken:    opts.SessionToken,
-		},
+		Provider: opts.Credentials,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("s3backend: %w", err)
