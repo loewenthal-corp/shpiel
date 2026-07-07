@@ -5,6 +5,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -82,15 +83,16 @@ func Build(cfg config.Config) (*App, error) {
 			}
 			backends[name] = b
 		case "s3":
-			creds := s3Credentials(bc.Auth)
+			creds, err := s3CredentialsProvider(bc.Auth, bc.Region)
+			if err != nil {
+				return nil, fmt.Errorf("backend %q: %w", name, err)
+			}
 			b, err := s3backend.New(name, s3backend.Options{
-				Endpoint:        bc.Endpoint,
-				Bucket:          bc.Bucket,
-				Region:          bc.Region,
-				Prefix:          bc.Prefix,
-				AccessKeyID:     creds.AccessKeyID,
-				SecretAccessKey: creds.SecretAccessKey,
-				SessionToken:    creds.SessionToken,
+				Endpoint:    bc.Endpoint,
+				Bucket:      bc.Bucket,
+				Region:      bc.Region,
+				Prefix:      bc.Prefix,
+				Credentials: creds,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("backend %q: %w", name, err)
@@ -186,22 +188,28 @@ func Build(cfg config.Config) (*App, error) {
 	}, nil
 }
 
-// envOr returns name when set, else the conventional fallback env name.
-func envOr(name, fallback string) string {
-	if name == "" {
-		return fallback
+// s3CredentialsProvider resolves bucket credentials in the AWS default
+// chain's spirit: explicit static keys (the configured env indirection,
+// falling back to the standard AWS names), then ambient web identity
+// (AWS_WEB_IDENTITY_TOKEN_FILE + AWS_ROLE_ARN — what IRSA and other
+// OIDC-federated runtimes inject), then anonymous.
+func s3CredentialsProvider(auth config.BackendAuth, region string) (s3client.CredentialsProvider, error) {
+	static := s3client.Credentials{
+		AccessKeyID:     os.Getenv(cmp.Or(auth.AccessKeyIDEnv, "AWS_ACCESS_KEY_ID")),
+		SecretAccessKey: os.Getenv(cmp.Or(auth.SecretAccessKeyEnv, "AWS_SECRET_ACCESS_KEY")),
+		SessionToken:    os.Getenv(cmp.Or(auth.SessionTokenEnv, "AWS_SESSION_TOKEN")),
 	}
-	return name
-}
-
-// s3Credentials resolves static credentials from the configured env
-// indirection, falling back to the standard AWS names.
-func s3Credentials(auth config.BackendAuth) s3client.Credentials {
-	return s3client.Credentials{
-		AccessKeyID:     os.Getenv(envOr(auth.AccessKeyIDEnv, "AWS_ACCESS_KEY_ID")),
-		SecretAccessKey: os.Getenv(envOr(auth.SecretAccessKeyEnv, "AWS_SECRET_ACCESS_KEY")),
-		SessionToken:    os.Getenv(envOr(auth.SessionTokenEnv, "AWS_SESSION_TOKEN")),
+	if !static.IsZero() {
+		return s3client.StaticCredentials(static), nil
 	}
+	tokenFile, roleARN := os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE"), os.Getenv("AWS_ROLE_ARN")
+	if tokenFile == "" || roleARN == "" {
+		return s3client.StaticCredentials{}, nil // anonymous
+	}
+	region = cmp.Or(region, "us-east-1")
+	// AWS_ENDPOINT_URL_STS is the SDK-conventional endpoint override.
+	endpoint := cmp.Or(os.Getenv("AWS_ENDPOINT_URL_STS"), "https://sts."+region+".amazonaws.com")
+	return s3client.NewWebIdentityProvider(endpoint, roleARN, tokenFile, os.Getenv("AWS_ROLE_SESSION_NAME"))
 }
 
 // xetStore builds the xorb store: a local directory, or — with
@@ -212,11 +220,15 @@ func xetStore(cfg config.Config) (*xet.Store, error) {
 		return xet.NewStore(cfg.Xet.DataDir)
 	}
 	bc := cfg.Backends[cfg.Xet.StoreBackend] // Validate() guarantees presence and type
+	creds, err := s3CredentialsProvider(bc.Auth, bc.Region)
+	if err != nil {
+		return nil, fmt.Errorf("xet.store_backend %q: %w", cfg.Xet.StoreBackend, err)
+	}
 	client, err := s3client.New(s3client.Options{
-		Endpoint:    bc.Endpoint,
-		Bucket:      bc.Bucket,
-		Region:      bc.Region,
-		Credentials: s3Credentials(bc.Auth),
+		Endpoint: bc.Endpoint,
+		Bucket:   bc.Bucket,
+		Region:   bc.Region,
+		Provider: creds,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("xet.store_backend %q: %w", cfg.Xet.StoreBackend, err)

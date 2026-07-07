@@ -15,6 +15,7 @@ import (
 	"github.com/loewenthal-corp/shpiel/internal/fakehub"
 	"github.com/loewenthal-corp/shpiel/internal/fakes3"
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
+	"github.com/loewenthal-corp/shpiel/internal/s3client"
 )
 
 const commitA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -27,12 +28,14 @@ func newTestBackend(t *testing.T, prefix string) (*Backend, *fakes3.Server) {
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
 	b, err := New("test", Options{
-		Endpoint:        srv.URL,
-		Bucket:          "models-bucket",
-		Region:          "us-east-1",
-		Prefix:          prefix,
-		AccessKeyID:     "AKIDTEST",
-		SecretAccessKey: "secret",
+		Endpoint: srv.URL,
+		Bucket:   "models-bucket",
+		Region:   "us-east-1",
+		Prefix:   prefix,
+		Credentials: s3client.StaticCredentials{
+			AccessKeyID:     "AKIDTEST",
+			SecretAccessKey: "secret",
+		},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

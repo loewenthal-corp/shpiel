@@ -39,6 +39,9 @@ type Options struct {
 	// what S3-compatible services conventionally expect.
 	Region      string
 	Credentials Credentials
+	// Provider supplies rotating credentials (IRSA/web identity); when
+	// set it takes precedence over the static Credentials.
+	Provider CredentialsProvider
 }
 
 // Client talks to one bucket.
@@ -47,7 +50,7 @@ type Client struct {
 	host       string
 	pathPrefix string // "" (virtual-hosted) or "/<bucket>" (path-style)
 	region     string
-	creds      Credentials
+	creds      CredentialsProvider
 	http       *http.Client
 	now        func() time.Time
 }
@@ -61,9 +64,13 @@ func New(opts Options) (*Client, error) {
 	if region == "" {
 		region = "us-east-1"
 	}
+	creds := opts.Provider
+	if creds == nil {
+		creds = StaticCredentials(opts.Credentials)
+	}
 	c := &Client{
 		region: region,
-		creds:  opts.Credentials,
+		creds:  creds,
 		// A private transport: sharing http.DefaultTransport means anyone
 		// calling CloseIdleConnections on it (httptest servers do on
 		// Close) can break this client's in-flight requests.
@@ -106,10 +113,14 @@ func (c *Client) newRequest(ctx context.Context, method, key string, query url.V
 	return http.NewRequestWithContext(ctx, method, u.String(), body)
 }
 
-// do signs (unless anonymous) and sends a request.
+// do resolves credentials, signs (unless anonymous), and sends a request.
 func (c *Client) do(req *http.Request, payloadHash string) (*http.Response, error) {
-	if !c.creds.IsZero() {
-		sign(req, c.creds, c.region, payloadHash, c.now())
+	creds, err := c.creds.Credentials(req.Context())
+	if err != nil {
+		return nil, fmt.Errorf("s3client: resolving credentials: %w", err)
+	}
+	if !creds.IsZero() {
+		sign(req, creds, c.region, payloadHash, c.now())
 	}
 	return c.http.Do(req)
 }
