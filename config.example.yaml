@@ -95,7 +95,11 @@ admin:
 # all backends serve them normally.
 xet:
   enabled: false
-  # data_dir: /var/lib/shpiel-xet   # required when enabled; xorbs + records
+  # Exactly one of data_dir / store_backend when enabled:
+  # data_dir: /var/lib/shpiel-xet   # local xorb + record store
+  # store_backend: archive          # or: an s3 backend doubling as the
+  #                                 # xorb store (keys under <prefix>/xet/);
+  #                                 # no local state, shareable by replicas
 
 log:
   level: info # debug | info | warn | error

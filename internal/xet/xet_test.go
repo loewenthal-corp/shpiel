@@ -2,6 +2,7 @@ package xet
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"testing"
 
@@ -288,32 +289,36 @@ func TestParseShardRejectsGarbage(t *testing.T) {
 
 func TestStoreRoundtrip(t *testing.T) {
 	t.Parallel()
-	store, err := NewStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
+	for name, store := range storeVariants(t) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			testStoreRoundtrip(t, store)
+		})
 	}
+}
 
+func testStoreRoundtrip(t *testing.T, store *Store) {
 	content := bytes.Repeat([]byte("weights!"), 1024)
 	xorb := buildChunk(t, content, compressionLZ4)
 	xorb = append(xorb, []byte("XETBLOB")...)
 
 	var h Hash
 	h[0] = 0xAB
-	created, err := store.PutXorb(h, xorb)
+	created, err := store.PutXorb(context.Background(), h, xorb)
 	if err != nil || !created {
 		t.Fatalf("PutXorb = %v, %v", created, err)
 	}
 	// Idempotent.
-	created, err = store.PutXorb(h, xorb)
+	created, err = store.PutXorb(context.Background(), h, xorb)
 	if err != nil || created {
 		t.Fatalf("second PutXorb = %v, %v", created, err)
 	}
 
-	chunks, err := store.XorbChunks(h)
+	chunks, err := store.XorbChunks(context.Background(), h)
 	if err != nil || len(chunks) != 1 {
 		t.Fatalf("XorbChunks = %v, %v", chunks, err)
 	}
-	data, err := store.ReadXorb(h)
+	data, err := store.ReadXorb(context.Background(), h)
 	if err != nil || !bytes.Equal(data, xorb) {
 		t.Fatalf("ReadXorb mismatch: %v", err)
 	}
@@ -324,18 +329,18 @@ func TestStoreRoundtrip(t *testing.T) {
 		TotalLen: int64(len(content)),
 		Terms:    []TermRecord{{Xorb: h.Hex(), ChunkStart: 0, ChunkEnd: 1, UnpackedLen: int64(len(content))}},
 	}
-	if err := store.PutFile(rec); err != nil {
+	if err := store.PutFile(context.Background(), rec); err != nil {
 		t.Fatal(err)
 	}
-	back, err := store.File(h)
+	back, err := store.File(context.Background(), h)
 	if err != nil || back.SHA256 != rec.SHA256 || len(back.Terms) != 1 {
 		t.Fatalf("File = %+v, %v", back, err)
 	}
-	fileHash, ok := store.FileHashBySHA256(rec.SHA256)
+	fileHash, ok := store.FileHashBySHA256(context.Background(), rec.SHA256)
 	if !ok || fileHash != h.Hex() {
 		t.Fatalf("FileHashBySHA256 = %q, %v", fileHash, ok)
 	}
-	if _, err := store.File(Hash{0x01}); err != ErrNotFound {
+	if _, err := store.File(context.Background(), Hash{0x01}); err != ErrNotFound {
 		t.Fatalf("missing file = %v, want ErrNotFound", err)
 	}
 }
@@ -347,7 +352,7 @@ func TestRejectCorruptXorb(t *testing.T) {
 		t.Fatal(err)
 	}
 	var h Hash
-	if _, err := store.PutXorb(h, []byte{9, 9, 9}); err == nil {
+	if _, err := store.PutXorb(context.Background(), h, []byte{9, 9, 9}); err == nil {
 		t.Fatal("corrupt xorb accepted")
 	}
 }

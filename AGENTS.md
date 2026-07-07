@@ -30,8 +30,9 @@ internal/relay      backend-first reads; pull-through on miss (singleflight);
    │                                 (fakes3 is its strict in-process test double)
    ├── internal/xet                  Xet protocol server: CAS API (xorb/shard
    │                                 ingest + reconstruction), format parsers,
-   │                                 content-addressed store; ingested files
-   │                                 materialize into the routed backend
+   │                                 content-addressed store (local dir or an
+   │                                 s3 backend's bucket via xet.store_backend);
+   │                                 ingested files materialize into the backend
    └── internal/upstream             huggingface.co client (pull-through source)
 ```
 

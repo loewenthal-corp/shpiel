@@ -284,15 +284,14 @@ func (b *Backend) StatBlob(ctx context.Context, kind hfapi.RepoKind, repo hfapi.
 // OpenBlob implements backend.Backend with a lazy ranged reader, so HTTP
 // Range requests against Shpiel translate to ranged object GETs.
 func (b *Backend) OpenBlob(ctx context.Context, kind hfapi.RepoKind, repo hfapi.RepoID, digest backend.Digest) (io.ReadSeekCloser, error) {
-	key := b.blobKey(kind, repo, digest)
-	size, err := b.client.Head(ctx, key)
+	rc, err := b.client.OpenRanged(ctx, b.blobKey(kind, repo, digest))
 	if err != nil {
 		if errors.Is(err, s3client.ErrNotFound) {
 			return nil, backend.ErrBlobNotFound
 		}
 		return nil, fmt.Errorf("s3backend: opening blob %s: %w", digest, err)
 	}
-	return &blobReader{ctx: ctx, client: b.client, key: key, size: size}, nil
+	return rc, nil
 }
 
 // PutBlob implements backend.Backend. Content is spooled to a temp file
@@ -340,68 +339,4 @@ func validRelPath(p string) bool {
 		}
 	}
 	return true
-}
-
-// blobReader exposes an object as an io.ReadSeekCloser. Seeks translate
-// into ranged GETs, so http.ServeContent's Range handling works against
-// bucket-backed content without buffering.
-type blobReader struct {
-	ctx    context.Context
-	client *s3client.Client
-	key    string
-	size   int64
-	pos    int64
-	cur    io.ReadCloser
-}
-
-func (r *blobReader) Read(p []byte) (int, error) {
-	if r.pos >= r.size {
-		return 0, io.EOF
-	}
-	if r.cur == nil {
-		rc, err := r.client.Get(r.ctx, r.key, r.pos)
-		if err != nil {
-			return 0, err
-		}
-		r.cur = struct {
-			io.Reader
-			io.Closer
-		}{io.LimitReader(rc, r.size-r.pos), rc}
-	}
-	n, err := r.cur.Read(p)
-	r.pos += int64(n)
-	if errors.Is(err, io.EOF) && r.pos < r.size {
-		err = io.ErrUnexpectedEOF
-	}
-	return n, err
-}
-
-func (r *blobReader) Seek(offset int64, whence int) (int64, error) {
-	var next int64
-	switch whence {
-	case io.SeekStart:
-		next = offset
-	case io.SeekCurrent:
-		next = r.pos + offset
-	case io.SeekEnd:
-		next = r.size + offset
-	default:
-		return 0, fmt.Errorf("s3backend: invalid seek whence %d", whence)
-	}
-	if next < 0 {
-		return 0, fmt.Errorf("s3backend: negative seek position %d", next)
-	}
-	if next != r.pos && r.cur != nil {
-		_ = r.cur.Close()
-		r.cur = nil
-	}
-	r.pos = next
-	return next, nil
-}
-
-func (r *blobReader) Close() error {
-	if r.cur != nil {
-		return r.cur.Close()
-	}
-	return nil
 }

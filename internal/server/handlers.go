@@ -222,7 +222,7 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 		// for this exact content; hf_xet clients then fetch through the
 		// CAS API, everyone else ignores the headers.
 		if s.xet != nil {
-			if fileHash, ok := s.xet.Store().FileHashBySHA256(entry.LFS.SHA256); ok {
+			if fileHash, ok := s.xet.Store().FileHashBySHA256(r.Context(), entry.LFS.SHA256); ok {
 				scheme, host := requestSchemeHost(r)
 				h.Set(xet.HeaderHash, fileHash)
 				h.Set(xet.HeaderRefreshRoute, fmt.Sprintf("%s://%s/api/%s/%s/xet-read-token/%s",

@@ -67,6 +67,8 @@ inference engines ◀── HF API (reads, ranges) ──┘   │        ├─
 - **S3 backend.** Content-addressed blobs in any S3-compatible bucket —
   AWS S3, GCS in interop mode, MinIO, Ceph, R2 — as a primary store or as
   the archive replica behind an OCI primary. Hand-rolled SigV4, no SDK.
+  The same bucket can double as the Xet xorb store
+  (`xet.store_backend`), so chunk-level storage needs no local disk.
 - **Fan-out replication.** Routes can declare replicas (a second registry,
   another cluster); pushes replicate asynchronously through a disk-spooled
   retry queue. No database, restart-safe.
@@ -138,7 +140,7 @@ filesystem, and S3 backends, pull-through, replication, and the ops
 surface described above are all shipped and covered by conformance + e2e
 tests.
 
-On the roadmap: the S3 backend doubling as the Xet xorb store, global
+On the roadmap: ambient AWS credentials (IRSA) for the S3 backend, global
 chunk-level dedup queries, dataset repos, mintable local tokens and OIDC
 for air-gapped auth, and published Spegel benchmark numbers. The
 [spec](spec.md) tracks the details.

@@ -54,6 +54,13 @@ func newTestService(t *testing.T, mat Materializer) (*Service, *http.ServeMux) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return newTestServiceOn(t, mat, store)
+}
+
+// newTestServiceOn is newTestService over a caller-provided store (the
+// protocol tests run on both the disk and bucket persistence layers).
+func newTestServiceOn(t *testing.T, mat Materializer, store *Store) (*Service, *http.ServeMux) {
+	t.Helper()
 	svc, err := NewService(store, mat, slog.New(slog.DiscardHandler), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -321,7 +328,7 @@ func TestHandleShardUploadMaterializes(t *testing.T) {
 		t.Fatalf("materialized blob missing or wrong (%d bytes)", len(got))
 	}
 	// The file record and sha256 mapping landed in the store.
-	if back, ok := svc.Store().FileHashBySHA256(shaHex); !ok || back != fileHash.Hex() {
+	if back, ok := svc.Store().FileHashBySHA256(context.Background(), shaHex); !ok || back != fileHash.Hex() {
 		t.Fatalf("sha256 mapping = %q, %v", back, ok)
 	}
 }
@@ -376,10 +383,23 @@ func TestHandleShardUploadFailures(t *testing.T) {
 	}
 }
 
+// TestReconstructionAndDataURL runs the full CAS protocol flow — xorb
+// upload, shard ingest with materialization, reconstruction (whole and
+// ranged), and signed data URLs — identically on both store persistence
+// layers.
 func TestReconstructionAndDataURL(t *testing.T) {
 	t.Parallel()
+	for name, store := range storeVariants(t) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			testReconstructionAndDataURL(t, store)
+		})
+	}
+}
+
+func testReconstructionAndDataURL(t *testing.T, store *Store) {
 	mat := newMemMaterializer()
-	svc, mux := newTestService(t, mat)
+	svc, mux := newTestServiceOn(t, mat, store)
 	repo, _ := hfapi.ParseRepoID("org/repo")
 	writeTok, _ := svc.MintToken("write", hfapi.RepoKindModel, repo, "alice")
 	readTok, _ := svc.MintToken("read", hfapi.RepoKindModel, repo, "alice")

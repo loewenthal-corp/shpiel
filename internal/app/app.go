@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
+	"strings"
 
 	"github.com/loewenthal-corp/shpiel/internal/audit"
 	"github.com/loewenthal-corp/shpiel/internal/backend"
@@ -19,6 +21,7 @@ import (
 	"github.com/loewenthal-corp/shpiel/internal/metrics"
 	"github.com/loewenthal-corp/shpiel/internal/relay"
 	"github.com/loewenthal-corp/shpiel/internal/replication"
+	"github.com/loewenthal-corp/shpiel/internal/s3client"
 	"github.com/loewenthal-corp/shpiel/internal/server"
 	"github.com/loewenthal-corp/shpiel/internal/upstream"
 	"github.com/loewenthal-corp/shpiel/internal/xet"
@@ -79,14 +82,15 @@ func Build(cfg config.Config) (*App, error) {
 			}
 			backends[name] = b
 		case "s3":
+			creds := s3Credentials(bc.Auth)
 			b, err := s3backend.New(name, s3backend.Options{
 				Endpoint:        bc.Endpoint,
 				Bucket:          bc.Bucket,
 				Region:          bc.Region,
 				Prefix:          bc.Prefix,
-				AccessKeyID:     os.Getenv(envOr(bc.Auth.AccessKeyIDEnv, "AWS_ACCESS_KEY_ID")),
-				SecretAccessKey: os.Getenv(envOr(bc.Auth.SecretAccessKeyEnv, "AWS_SECRET_ACCESS_KEY")),
-				SessionToken:    os.Getenv(envOr(bc.Auth.SessionTokenEnv, "AWS_SESSION_TOKEN")),
+				AccessKeyID:     creds.AccessKeyID,
+				SecretAccessKey: creds.SecretAccessKey,
+				SessionToken:    creds.SessionToken,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("backend %q: %w", name, err)
@@ -155,7 +159,7 @@ func Build(cfg config.Config) (*App, error) {
 
 	var xetSvc *xet.Service
 	if cfg.Xet.Enabled {
-		store, err := xet.NewStore(cfg.Xet.DataDir)
+		store, err := xetStore(cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -188,6 +192,36 @@ func envOr(name, fallback string) string {
 		return fallback
 	}
 	return name
+}
+
+// s3Credentials resolves static credentials from the configured env
+// indirection, falling back to the standard AWS names.
+func s3Credentials(auth config.BackendAuth) s3client.Credentials {
+	return s3client.Credentials{
+		AccessKeyID:     os.Getenv(envOr(auth.AccessKeyIDEnv, "AWS_ACCESS_KEY_ID")),
+		SecretAccessKey: os.Getenv(envOr(auth.SecretAccessKeyEnv, "AWS_SECRET_ACCESS_KEY")),
+		SessionToken:    os.Getenv(envOr(auth.SessionTokenEnv, "AWS_SESSION_TOKEN")),
+	}
+}
+
+// xetStore builds the xorb store: a local directory, or — with
+// xet.store_backend — the named s3 backend's bucket under <prefix>/xet/,
+// so the archive bucket doubles as the xorb store.
+func xetStore(cfg config.Config) (*xet.Store, error) {
+	if cfg.Xet.StoreBackend == "" {
+		return xet.NewStore(cfg.Xet.DataDir)
+	}
+	bc := cfg.Backends[cfg.Xet.StoreBackend] // Validate() guarantees presence and type
+	client, err := s3client.New(s3client.Options{
+		Endpoint:    bc.Endpoint,
+		Bucket:      bc.Bucket,
+		Region:      bc.Region,
+		Credentials: s3Credentials(bc.Auth),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("xet.store_backend %q: %w", cfg.Xet.StoreBackend, err)
+	}
+	return xet.NewBucketStore(client, path.Join(strings.Trim(bc.Prefix, "/"), "xet")), nil
 }
 
 // replicatorOrNil avoids handing the relay a typed-nil interface.
