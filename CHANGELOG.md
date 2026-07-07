@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/loewenthal-corp/shpiel/compare/v0.1.1...v0.2.0) (2026-07-07)
+
+
+### Features
+
+* **backend:** s3-compatible bucket backend (type: s3) ([#33](https://github.com/loewenthal-corp/shpiel/issues/33)) ([e972240](https://github.com/loewenthal-corp/shpiel/commit/e9722406be4b2297d1da55cc137ab0bf4342a661))
+
+
+### Bug Fixes
+
+* **website:** make website CI pass under the pnpm 10→11 upgrade ([#26](https://github.com/loewenthal-corp/shpiel/issues/26)) ([5d727ee](https://github.com/loewenthal-corp/shpiel/commit/5d727ee748eb80e876ac399ba88159cc2446eb0d))
+
 ## [0.1.1](https://github.com/loewenthal-corp/shpiel/compare/v0.1.0...v0.1.1) (2026-07-03)
 
 
