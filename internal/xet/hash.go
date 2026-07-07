@@ -52,6 +52,19 @@ func ParseHex(s string) (Hash, error) {
 	return h, nil
 }
 
+// globalDedupChunkModulus mirrors MDB_SHARD_GLOBAL_DEDUP_CHUNK_MODULUS in
+// xet-core: a chunk is global-dedup eligible when its hash's fourth u64
+// limb is divisible by it. Clients only query eligible chunks, so the
+// server only indexes them (~1/1024 of all chunks).
+const globalDedupChunkModulus = 1024
+
+// GlobalDedupEligible reports whether clients may query this chunk hash
+// through the global-deduplication API (DataHash % modulus == 0 in
+// xet-core, where % reads the fourth little-endian u64 limb).
+func (h Hash) GlobalDedupEligible() bool {
+	return binary.LittleEndian.Uint64(h[24:32])%globalDedupChunkModulus == 0
+}
+
 // IsBookend reports whether the hash is the all-ones sentinel that
 // terminates shard sections.
 func (h Hash) IsBookend() bool {

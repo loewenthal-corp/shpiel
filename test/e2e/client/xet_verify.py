@@ -98,7 +98,34 @@ with open(local, "rb") as f:
 info2 = api.upload_folder(repo_id=REPO, folder_path="/tmp/xet-upload", commit_message="retry")
 check("noop_reupload", info2.oid == info.oid, f"{info2.oid} != {info.oid}")
 
-# 6. The hf CLI end to end, xet on. Locate the download in the cache dir
+# 6. Cross-repo push of identical content: the global-dedup path (the
+# client probes /xet/v1/chunks for sampled chunks and skips re-uploading
+# xorbs on a hit) must at minimum converge to a correct second repo —
+# the copy materializes and serves the exact bytes over plain HTTP.
+COPY = REPO + "-copy"
+api.create_repo(COPY, exist_ok=True)
+info3 = api.upload_folder(repo_id=COPY, folder_path="/tmp/xet-upload", commit_message="cross-repo dedup")
+check("cross_repo_upload.oid", bool(info3.oid), info3)
+plain_copy = subprocess.run(
+    [
+        sys.executable,
+        "-c",
+        (
+            "from huggingface_hub import hf_hub_download;"
+            f"p = hf_hub_download(repo_id={COPY!r}, filename='model.safetensors',"
+            f" cache_dir='/tmp/plain-copy-cache');"
+            "print(p)"
+        ),
+    ],
+    env={**os.environ, "HF_HUB_DISABLE_XET": "1"},
+    capture_output=True,
+    text=True,
+)
+check("cross_repo_plain_download.exit", plain_copy.returncode == 0, plain_copy.stderr[-800:])
+with open(plain_copy.stdout.strip().splitlines()[-1], "rb") as f:
+    check("cross_repo_plain_download.sha256", hashlib.sha256(f.read()).hexdigest() == sha_weights)
+
+# 7. The hf CLI end to end, xet on. Locate the download in the cache dir
 # rather than parsing stdout (its format changes between CLI versions).
 import glob
 

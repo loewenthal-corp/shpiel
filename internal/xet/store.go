@@ -28,6 +28,9 @@ var ErrNotFound = errors.New("xet: not found")
 //	xorbs/{xorb-hex}.chunks.json  cached chunk layout (WalkChunks)
 //	files/{file-hex}.json         FileRecord (terms + sha256)
 //	sha256/{sha256-hex}           object containing the xet file hash hex
+//	shards/{sha256-hex}           raw shard bytes (global-dedup answers)
+//	chunks/{chunk-hex}            object containing the shard key holding
+//	                              this dedup-eligible chunk
 //
 // The keys live on a byte-persistence layer that is either a local
 // directory (NewStore) or an S3-compatible bucket (NewBucketStore) — the
@@ -61,7 +64,7 @@ func NewStore(dir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, sub := range []string{"xorbs", "files", "sha256"} {
+	for _, sub := range []string{"xorbs", "files", "sha256", "shards", "chunks"} {
 		if err := os.MkdirAll(filepath.Join(abs, sub), 0o755); err != nil {
 			return nil, fmt.Errorf("xet: creating store: %w", err)
 		}
@@ -80,10 +83,11 @@ func NewBucketStore(client *s3client.Client, prefix string) *Store {
 	return &Store{objects: bucketObjects{client: client, prefix: prefix}}
 }
 
-func xorbKey(h Hash) string    { return "xorbs/" + h.Hex() }
-func chunksKey(h Hash) string  { return "xorbs/" + h.Hex() + ".chunks.json" }
-func fileKey(h Hash) string    { return "files/" + h.Hex() + ".json" }
-func shaKey(sha string) string { return "sha256/" + strings.ToLower(sha) }
+func xorbKey(h Hash) string       { return "xorbs/" + h.Hex() }
+func chunksKey(h Hash) string     { return "xorbs/" + h.Hex() + ".chunks.json" }
+func fileKey(h Hash) string       { return "files/" + h.Hex() + ".json" }
+func shaKey(sha string) string    { return "sha256/" + strings.ToLower(sha) }
+func chunkIndexKey(h Hash) string { return "chunks/" + h.Hex() }
 
 // HasXorb reports whether a xorb is stored (errors read as absent — the
 // caller's fallback is a re-upload, which is idempotent).
@@ -199,6 +203,43 @@ func (s *Store) File(ctx context.Context, h Hash) (*FileRecord, error) {
 	return &rec, nil
 }
 
+// PutDedupShard stores raw shard bytes and points each dedup-eligible
+// chunk at them: the shard itself is the global-dedup query answer (the
+// same trick xet-core's reference server uses — clients parse the shard
+// they get back exactly like one they would upload). Shard first, then
+// the chunk pointers, so a visible pointer always resolves.
+func (s *Store) PutDedupShard(ctx context.Context, shard []byte, chunks []Hash) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	key := "shards/" + sha256Hex(shard)
+	if err := s.objects.write(ctx, key, shard); err != nil {
+		return err
+	}
+	for _, chunk := range chunks {
+		if err := s.objects.write(ctx, chunkIndexKey(chunk), []byte(key)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var shardKeyPattern = regexp.MustCompile(`^shards/[0-9a-f]{64}$`)
+
+// DedupShard returns the stored shard covering a dedup-eligible chunk, or
+// ErrNotFound.
+func (s *Store) DedupShard(ctx context.Context, chunk Hash) ([]byte, error) {
+	pointer, err := s.objects.read(ctx, chunkIndexKey(chunk))
+	if err != nil {
+		return nil, err
+	}
+	key := strings.TrimSpace(string(pointer))
+	if !shardKeyPattern.MatchString(key) {
+		return nil, fmt.Errorf("xet: corrupt chunk index %s: pointer %q", chunk.Hex(), key)
+	}
+	return s.objects.read(ctx, key)
+}
+
 var sha256HexPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 // FileHashBySHA256 returns the xet file hash for a content sha256, powering
@@ -307,6 +348,10 @@ func (b bucketObjects) open(ctx context.Context, key string) (io.ReadSeekCloser,
 }
 
 func (b bucketObjects) write(ctx context.Context, key string, data []byte) error {
+	return b.client.Put(ctx, b.key(key), strings.NewReader(string(data)), int64(len(data)), sha256Hex(data))
+}
+
+func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
-	return b.client.Put(ctx, b.key(key), strings.NewReader(string(data)), int64(len(data)), hex.EncodeToString(sum[:]))
+	return hex.EncodeToString(sum[:])
 }

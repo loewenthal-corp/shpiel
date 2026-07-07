@@ -81,7 +81,7 @@ func TestMaterializeLargeFileIntoOCIBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	mat := registryMaterializer{b: ob}
-	svc, err := NewService(store, mat, slog.New(slog.DiscardHandler), nil)
+	svc, err := NewService(store, mat, nil, slog.New(slog.DiscardHandler), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

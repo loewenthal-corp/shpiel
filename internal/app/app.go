@@ -163,7 +163,7 @@ func Build(cfg config.Config) (*App, error) {
 		if err != nil {
 			return nil, err
 		}
-		xetSvc, err = xet.NewService(store, rl, log, auditLog)
+		xetSvc, err = xet.NewService(store, rl, m, log, auditLog)
 		if err != nil {
 			return nil, err
 		}

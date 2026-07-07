@@ -53,7 +53,9 @@ inference engines ◀── HF API (reads, ranges) ──┘   │        ├─
 - **Xet, server-side.** `huggingface_hub` 1.x uploads through the Xet
   protocol with no LFS fallback; Shpiel implements the CAS API (the first
   open-source server that does), so current clients push and pull
-  chunk-level with zero client-side flags.
+  chunk-level with zero client-side flags — including the global
+  chunk-deduplication probe, so identical content pushed to different
+  repos skips the re-upload.
 - **Pull-through caching.** On a miss, Shpiel fetches from huggingface.co,
   persists to your backend, and serves — with request collapsing so a
   hundred nodes asking for the same model cost one upstream download.

@@ -57,6 +57,9 @@ type ShardXorb struct {
 	// serialized (chunk stream) length.
 	NumBytesInXorb int64
 	NumBytesOnDisk int64
+	// ChunkHashes are the declared chunk hashes, in xorb order — the
+	// global-dedup index keys.
+	ChunkHashes []Hash
 }
 
 // ParseShard parses a serialized MDB shard. Two layouts exist in the wild:
@@ -168,8 +171,9 @@ func parseFileSection(section []byte, shard *Shard) (int, error) {
 	return off, nil
 }
 
-// parseXorbSection reads XorbChunkSequenceHeader records and skips their
-// chunk entries (boundaries come from walking the xorb bytes themselves).
+// parseXorbSection reads XorbChunkSequenceHeader records and their chunk
+// entries, reading each chunk's hash (byte boundaries come from walking
+// the xorb bytes themselves; the hashes key the global-dedup index).
 // Returns the offset just past the bookend record.
 func parseXorbSection(section []byte, shard *Shard) (int, error) {
 	off := 0
@@ -188,16 +192,21 @@ func parseXorbSection(section []byte, shard *Shard) (int, error) {
 		if numEntries < 0 || numEntries > 1<<20 {
 			return 0, fmt.Errorf("xet: shard xorb entry count %d implausible", numEntries)
 		}
-		shard.Xorbs = append(shard.Xorbs, ShardXorb{
+		if off+numEntries*shardRecordLen > len(section) {
+			return 0, fmt.Errorf("xet: shard xorb section truncated")
+		}
+		xorb := ShardXorb{
 			XorbHash:       xorbHash,
 			NumChunks:      numEntries,
 			NumBytesInXorb: int64(bytesInXorb),
 			NumBytesOnDisk: int64(bytesOnDisk),
-		})
-		off += numEntries * shardRecordLen
-		if off > len(section) {
-			return 0, fmt.Errorf("xet: shard xorb section truncated")
+			ChunkHashes:    make([]Hash, numEntries),
 		}
+		for i := range numEntries {
+			copy(xorb.ChunkHashes[i][:], section[off:off+32])
+			off += shardRecordLen
+		}
+		shard.Xorbs = append(shard.Xorbs, xorb)
 	}
 	return off, nil
 }
