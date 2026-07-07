@@ -154,6 +154,8 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST /xet/shards", s.instrument("xet_shard", s.xet.HandleShardUpload))
 		mux.HandleFunc("GET /xet/v1/reconstructions/{file_id}", s.instrument("xet_reconstruction", s.xet.HandleReconstruction))
 		mux.HandleFunc("GET /xet/v1/chunks/{prefix}/{hash}", s.instrument("xet_chunk_query", s.xet.HandleChunkQuery))
+		// Same /v1-less tolerance as /shards, for the dedup probe.
+		mux.HandleFunc("GET /xet/chunks/{prefix}/{hash}", s.instrument("xet_chunk_query", s.xet.HandleChunkQuery))
 		mux.HandleFunc("GET /xet/data/{hash}", s.instrument("xet_data", s.xet.HandleXorbData))
 	}
 	mux.HandleFunc("GET /healthz", s.handleHealthz)

@@ -202,12 +202,16 @@ func buildShard(t *testing.T, files []ShardFile, xorbs []ShardXorb) []byte {
 		u32(uint32(x.NumChunks))
 		u32(uint32(x.NumBytesInXorb))
 		u32(uint32(x.NumBytesOnDisk))
-		for range x.NumChunks {
-			body.Write(bytes.Repeat([]byte{0x11}, 32)) // chunk hash (unused by parser)
-			u32(0)                                     // byte range start
-			u32(0)                                     // unpacked
-			u32(0)                                     // flags
-			u32(0)                                     // unused
+		for i := range x.NumChunks {
+			if i < len(x.ChunkHashes) {
+				body.Write(x.ChunkHashes[i][:])
+			} else {
+				body.Write(bytes.Repeat([]byte{0x11}, 32)) // filler chunk hash
+			}
+			u32(0) // byte range start
+			u32(0) // unpacked
+			u32(0) // flags
+			u32(0) // unused
 		}
 	}
 	// Xorb section bookend.

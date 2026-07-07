@@ -19,6 +19,7 @@ import (
 
 	"github.com/loewenthal-corp/shpiel/internal/backend"
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
+	"github.com/loewenthal-corp/shpiel/internal/metrics"
 )
 
 // memMaterializer stores blobs in memory, verifying content against the
@@ -61,7 +62,7 @@ func newTestService(t *testing.T, mat Materializer) (*Service, *http.ServeMux) {
 // protocol tests run on both the disk and bucket persistence layers).
 func newTestServiceOn(t *testing.T, mat Materializer, store *Store) (*Service, *http.ServeMux) {
 	t.Helper()
-	svc, err := NewService(store, mat, slog.New(slog.DiscardHandler), nil)
+	svc, err := NewService(store, mat, metrics.New(), slog.New(slog.DiscardHandler), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestNewServiceDefaultsLogger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := NewService(store, nil, nil, nil)
+	svc, err := NewService(store, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +100,7 @@ func TestNewServiceDefaultsLogger(t *testing.T) {
 		t.Fatal("nil logger not defaulted")
 	}
 	custom := slog.New(slog.DiscardHandler)
-	svc, err = NewService(store, nil, custom, nil)
+	svc, err = NewService(store, nil, nil, custom, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

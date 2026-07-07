@@ -141,7 +141,7 @@ func TestXetRoutesOnlyWhenEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := xet.NewService(store, nil, slog.New(slog.DiscardHandler), nil)
+	svc, err := xet.NewService(store, nil, nil, slog.New(slog.DiscardHandler), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func TestXetTokenAuthScopes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := xet.NewService(store, nil, slog.New(slog.DiscardHandler), nil)
+	svc, err := xet.NewService(store, nil, nil, slog.New(slog.DiscardHandler), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

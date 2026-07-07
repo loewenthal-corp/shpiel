@@ -22,6 +22,7 @@ import (
 	"github.com/loewenthal-corp/shpiel/internal/audit"
 	"github.com/loewenthal-corp/shpiel/internal/backend"
 	"github.com/loewenthal-corp/shpiel/internal/hfapi"
+	"github.com/loewenthal-corp/shpiel/internal/metrics"
 )
 
 // Protocol size caps: xorbs max out at 64 MiB by construction; shards are
@@ -58,17 +59,18 @@ type Materializer interface {
 // ingest (with materialization), and the reconstruction API for chunk-level
 // downloads.
 type Service struct {
-	store  *Store
-	mat    Materializer
-	log    *slog.Logger
-	audit  *audit.Logger
-	secret []byte
+	store   *Store
+	mat     Materializer
+	metrics *metrics.Metrics
+	log     *slog.Logger
+	audit   *audit.Logger
+	secret  []byte
 }
 
 // NewService creates a Service. The signing secret is per-process: tokens
 // and data URLs die on restart, which is fine — clients refresh through
 // the token endpoints. auditLog may be nil.
-func NewService(store *Store, mat Materializer, log *slog.Logger, auditLog *audit.Logger) (*Service, error) {
+func NewService(store *Store, mat Materializer, m *metrics.Metrics, log *slog.Logger, auditLog *audit.Logger) (*Service, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -76,7 +78,15 @@ func NewService(store *Store, mat Materializer, log *slog.Logger, auditLog *audi
 	if _, err := rand.Read(secret); err != nil {
 		return nil, fmt.Errorf("xet: generating signing secret: %w", err)
 	}
-	return &Service{store: store, mat: mat, log: log, audit: auditLog, secret: secret}, nil
+	return &Service{store: store, mat: mat, metrics: m, log: log, audit: auditLog, secret: secret}, nil
+}
+
+// countDedup bumps the global-dedup event counter (metrics may be nil in
+// tests).
+func (s *Service) countDedup(event string) {
+	if s.metrics != nil {
+		s.metrics.XetDedup.WithLabelValues(event).Inc()
+	}
 }
 
 // Store exposes the underlying store (resolve headers use it).
@@ -188,6 +198,11 @@ func (s *Service) HandleXorbUpload(w http.ResponseWriter, r *http.Request) {
 		writeCASError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if inserted {
+		s.countDedup("xorb_new")
+	} else {
+		s.countDedup("xorb_duplicate")
+	}
 	s.log.InfoContext(r.Context(), "xet xorb ingested",
 		"hash", hash.Hex(), "bytes", len(body), "inserted", inserted)
 	if inserted {
@@ -255,6 +270,21 @@ func (s *Service) HandleShardUpload(w http.ResponseWriter, r *http.Request) {
 			Detail: map[string]any{"xetHash": rec.FileHash, "bytes": rec.TotalLen, "terms": len(rec.Terms)},
 		})
 	}
+	// Register the shard for global dedup: eligible chunk hashes point at
+	// these exact bytes, which future queries return verbatim.
+	var eligible []Hash
+	for i := range shard.Xorbs {
+		for _, chunk := range shard.Xorbs[i].ChunkHashes {
+			if chunk.GlobalDedupEligible() {
+				eligible = append(eligible, chunk)
+			}
+		}
+	}
+	if err := s.store.PutDedupShard(r.Context(), body, eligible); err != nil {
+		writeCASError(w, http.StatusInternalServerError, "registering dedup shard: "+err.Error())
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]int{"result": 1})
 }
@@ -474,12 +504,38 @@ func parseByteRange(header string, total int64) (int64, int64, error) {
 // HandleChunkQuery serves GET /xet/v1/chunks/{prefix}/{hash}: global
 // deduplication is not implemented, and 404 is the spec-defined "no dedup
 // info" answer clients proceed happily from.
+// HandleChunkQuery serves GET /xet/v1/chunks/{prefix}/{hash}: the global
+// deduplication probe. A hit answers with the raw bytes of a previously
+// uploaded shard containing the chunk; the client parses it like any
+// shard and dedups its upload against the xorbs it references. Misses —
+// including store trouble — are 404: dedup is an optimization, and its
+// unavailability must never fail an upload.
 func (s *Service) HandleChunkQuery(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.verifyBearer(r, "read"); !ok {
 		writeCASError(w, http.StatusUnauthorized, "invalid or expired CAS token")
 		return
 	}
-	writeCASError(w, http.StatusNotFound, "chunk not tracked by global deduplication")
+	if r.PathValue("prefix") != "default" {
+		writeCASError(w, http.StatusBadRequest, "unknown chunk prefix")
+		return
+	}
+	hash, err := ParseHex(r.PathValue("hash"))
+	if err != nil {
+		writeCASError(w, http.StatusBadRequest, "malformed chunk hash")
+		return
+	}
+	shardBytes, err := s.store.DedupShard(r.Context(), hash)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			s.log.WarnContext(r.Context(), "xet dedup lookup failed", "chunk", hash.Hex(), "error", err)
+		}
+		s.countDedup("query_miss")
+		writeCASError(w, http.StatusNotFound, "chunk not tracked by global deduplication")
+		return
+	}
+	s.countDedup("query_hit")
+	w.Header().Set("Content-Type", "application/octet-stream")
+	_, _ = w.Write(shardBytes)
 }
 
 // --- xorb data serving (fetch_info target) ---

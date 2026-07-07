@@ -27,6 +27,8 @@ type Metrics struct {
 
 	ReplicationQueueDepth prometheus.Gauge
 	ReplicationJobs       *prometheus.CounterVec // target, outcome
+
+	XetDedup *prometheus.CounterVec // event
 }
 
 // New creates a Metrics with its own registry, including the standard Go
@@ -72,11 +74,15 @@ func New() *Metrics {
 			Name: "shpiel_replication_jobs_total",
 			Help: "Replication job executions, by target backend and outcome.",
 		}, []string{"target", "outcome"}),
+		XetDedup: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "shpiel_xet_dedup_events_total",
+			Help: "Xet global-deduplication events: chunk query hits and misses, and duplicate xorb uploads (bytes the client re-sent that were already stored).",
+		}, []string{"event"}),
 	}
 	reg.MustRegister(
 		m.HTTPRequests, m.HTTPDuration, m.DownloadBytes, m.UploadBytes,
 		m.PullThroughFetches, m.Commits, m.InflightRequests,
-		m.ReplicationQueueDepth, m.ReplicationJobs,
+		m.ReplicationQueueDepth, m.ReplicationJobs, m.XetDedup,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
