@@ -164,7 +164,7 @@ tasks:
           exit 0
         fi
         changed=$(git diff --name-only "$base" -- '*.go' \
-          | grep -vE '(_test\.go$|^test/conformance/|^internal/fakehub/|^internal/fakeregistry/|^cmd/fakehub/)' || true)
+          | grep -vE '(_test\.go$|^test/conformance/|^internal/fakehub/|^internal/fakeregistry/|^internal/fakes3/|^cmd/fakehub/)' || true)
         if [ -z "$changed" ]; then
           echo "mutation:diff: no production Go changes vs $base; skipping."
           exit 0

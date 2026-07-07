@@ -117,15 +117,31 @@ type BackendConfig struct {
 	RepoPrefix string      `yaml:"repo_prefix,omitempty"`
 	Auth       BackendAuth `yaml:"auth,omitempty"`
 
-	// s3 (M1+)
+	// s3
 	Bucket string `yaml:"bucket,omitempty"`
+	// Region is the SigV4 signing region; required for AWS, defaults to
+	// us-east-1 when a custom endpoint is set.
 	Region string `yaml:"region,omitempty"`
+	// Endpoint overrides the AWS endpoint for S3-compatible services
+	// (MinIO, GCS interop, Ceph, R2); scheme required, path-style
+	// addressing.
+	Endpoint string `yaml:"endpoint,omitempty"`
+	// Prefix is prepended to every object key, for sharing a bucket.
+	Prefix string `yaml:"prefix,omitempty"`
 }
 
 // BackendAuth holds env-indirect credentials for a backend.
 type BackendAuth struct {
+	// oci
 	UsernameEnv string `yaml:"username_env,omitempty"`
 	PasswordEnv string `yaml:"password_env,omitempty"`
+
+	// s3: env vars holding static credentials. Unset fields fall back to
+	// the standard AWS names (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+	// AWS_SESSION_TOKEN); requests go unsigned when those are empty too.
+	AccessKeyIDEnv     string `yaml:"access_key_id_env,omitempty"`
+	SecretAccessKeyEnv string `yaml:"secret_access_key_env,omitempty"`
+	SessionTokenEnv    string `yaml:"session_token_env,omitempty"`
 }
 
 // Route maps repo-id globs to a primary backend and async replicas.
@@ -274,7 +290,14 @@ func (c *Config) Validate() error {
 			default:
 				errs = append(errs, fmt.Errorf("backend %q: unknown oci format %q (want modelpack|tar-layers)", name, b.Format))
 			}
-		case "s3", "huggingface":
+		case "s3":
+			if b.Bucket == "" {
+				errs = append(errs, fmt.Errorf("backend %q: s3 backend requires bucket", name))
+			}
+			if b.Region == "" && b.Endpoint == "" {
+				errs = append(errs, fmt.Errorf("backend %q: s3 backend requires region (or endpoint for S3-compatible services)", name))
+			}
+		case "huggingface":
 			errs = append(errs, fmt.Errorf("backend %q: type %q is not implemented yet", name, b.Type))
 		default:
 			errs = append(errs, fmt.Errorf("backend %q: unknown type %q", name, b.Type))

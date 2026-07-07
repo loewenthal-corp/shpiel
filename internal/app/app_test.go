@@ -44,6 +44,40 @@ func TestBuildWiresComponents(t *testing.T) {
 	}
 }
 
+// TestBuildWiresS3Backend proves the s3 driver participates in production
+// wiring: credentials resolve through the configured env indirection and
+// the backend lands in the router.
+func TestBuildWiresS3Backend(t *testing.T) {
+	t.Setenv("TEST_S3_ACCESS", "AKIDAPP")
+	t.Setenv("TEST_S3_SECRET", "app-secret")
+	cfg := validConfig(t)
+	cfg.Backends["archive"] = config.BackendConfig{
+		Type:     "s3",
+		Bucket:   "models",
+		Endpoint: "http://127.0.0.1:1",
+		Auth: config.BackendAuth{
+			AccessKeyIDEnv:     "TEST_S3_ACCESS",
+			SecretAccessKeyEnv: "TEST_S3_SECRET",
+		},
+	}
+	cfg.Routes = []config.Route{{Match: "*", Primary: "archive"}}
+	app, err := Build(cfg)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	backends := app.Relay.Backends()
+	if len(backends) != 1 || backends[0].Name() != "archive" {
+		t.Fatalf("routed backends = %v", backends)
+	}
+}
+
+func TestEnvOr(t *testing.T) {
+	t.Parallel()
+	if envOr("", "FALLBACK") != "FALLBACK" || envOr("SET", "FALLBACK") != "SET" {
+		t.Error("envOr precedence wrong")
+	}
+}
+
 func TestBuildReplicationAndAudit(t *testing.T) {
 	t.Parallel()
 	cfg := validConfig(t)

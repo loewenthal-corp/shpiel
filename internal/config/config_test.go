@@ -107,6 +107,9 @@ func TestValidateCatchesMistakes(t *testing.T) {
 		{"route to unknown backend", func(c *Config) { c.Routes = []Route{{Match: "*", Primary: "ghost"}} }, "not a configured backend"},
 		{"bad auth mode", func(c *Config) { c.Auth.Mode = "vibes" }, "auth.mode"},
 		{"xet without data dir", func(c *Config) { c.Xet.Enabled = true; c.Xet.DataDir = "" }, "xet.data_dir"},
+		{"s3 without bucket", func(c *Config) { c.Backends = map[string]BackendConfig{"x": {Type: "s3", Region: "us-east-1"}} }, "requires bucket"},
+		{"s3 without region or endpoint", func(c *Config) { c.Backends = map[string]BackendConfig{"x": {Type: "s3", Bucket: "b"}} }, "requires region"},
+		{"huggingface unimplemented", func(c *Config) { c.Backends = map[string]BackendConfig{"x": {Type: "huggingface"}} }, "not implemented"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -117,6 +120,23 @@ func TestValidateCatchesMistakes(t *testing.T) {
 				t.Fatalf("Validate = %v, want error containing %q", err, tc.wantSub)
 			}
 		})
+	}
+}
+
+// TestValidS3Backends pins the two legal s3 shapes: AWS (region, no
+// endpoint) and S3-compatible (endpoint, region optional).
+func TestValidS3Backends(t *testing.T) {
+	t.Parallel()
+	for name, b := range map[string]BackendConfig{
+		"aws":    {Type: "s3", Bucket: "models", Region: "eu-west-2"},
+		"compat": {Type: "s3", Bucket: "models", Endpoint: "http://minio:9000", Prefix: "shpiel"},
+	} {
+		cfg := Default()
+		cfg.Backends = map[string]BackendConfig{"archive": b}
+		cfg.Routes = []Route{{Match: "*", Primary: "archive"}}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%s s3 config rejected: %v", name, err)
+		}
 	}
 }
 
