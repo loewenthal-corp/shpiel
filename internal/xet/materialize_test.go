@@ -60,7 +60,7 @@ func TestMaterializeLargeFileIntoOCIBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.PutXorb(xorbHash, xorb); err != nil {
+	if _, err := store.PutXorb(context.Background(), xorbHash, xorb); err != nil {
 		t.Fatalf("PutXorb: %v", err)
 	}
 

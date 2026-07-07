@@ -183,7 +183,7 @@ func (s *Service) HandleXorbUpload(w http.ResponseWriter, r *http.Request) {
 		writeCASError(w, http.StatusBadRequest, "reading xorb body: "+err.Error())
 		return
 	}
-	inserted, err := s.store.PutXorb(hash, body)
+	inserted, err := s.store.PutXorb(r.Context(), hash, body)
 	if err != nil {
 		writeCASError(w, http.StatusBadRequest, err.Error())
 		return
@@ -237,7 +237,7 @@ func (s *Service) HandleShardUpload(w http.ResponseWriter, r *http.Request) {
 	for i := range shard.Files {
 		file := &shard.Files[i]
 		rec := recordFromShardFile(file)
-		if err := s.store.PutFile(rec); err != nil {
+		if err := s.store.PutFile(r.Context(), rec); err != nil {
 			writeCASError(w, http.StatusInternalServerError, "storing file record: "+err.Error())
 			return
 		}
@@ -302,7 +302,7 @@ func (s *Service) materialize(ctx context.Context, kind hfapi.RepoKind, repo hfa
 
 	pr, pw := io.Pipe()
 	go func() {
-		pw.CloseWithError(s.reconstruct(rec, pw))
+		pw.CloseWithError(s.reconstruct(ctx, rec, pw))
 	}()
 	if err := s.mat.PutLFSBlob(ctx, kind, repo, rec.SHA256, rec.TotalLen, pr); err != nil {
 		_ = pr.CloseWithError(err)
@@ -312,17 +312,17 @@ func (s *Service) materialize(ctx context.Context, kind hfapi.RepoKind, repo hfa
 }
 
 // reconstruct streams the file's bytes term by term.
-func (s *Service) reconstruct(rec *FileRecord, w io.Writer) error {
+func (s *Service) reconstruct(ctx context.Context, rec *FileRecord, w io.Writer) error {
 	for _, term := range rec.Terms {
 		xorbHash, err := ParseHex(term.Xorb)
 		if err != nil {
 			return err
 		}
-		xorb, err := s.store.ReadXorb(xorbHash)
+		xorb, err := s.store.ReadXorb(ctx, xorbHash)
 		if err != nil {
 			return fmt.Errorf("term references xorb %s: %w", term.Xorb, err)
 		}
-		chunks, err := s.store.XorbChunks(xorbHash)
+		chunks, err := s.store.XorbChunks(ctx, xorbHash)
 		if err != nil {
 			return err
 		}
@@ -377,7 +377,7 @@ func (s *Service) HandleReconstruction(w http.ResponseWriter, r *http.Request) {
 		writeCASError(w, http.StatusBadRequest, "malformed file id")
 		return
 	}
-	rec, err := s.store.File(fileHash)
+	rec, err := s.store.File(r.Context(), fileHash)
 	if err != nil {
 		writeCASError(w, http.StatusNotFound, "file not found")
 		return
@@ -412,7 +412,7 @@ func (s *Service) HandleReconstruction(w http.ResponseWriter, r *http.Request) {
 			writeCASError(w, http.StatusInternalServerError, "corrupt term")
 			return
 		}
-		chunks, err := s.store.XorbChunks(xorbHash)
+		chunks, err := s.store.XorbChunks(r.Context(), xorbHash)
 		if err != nil {
 			writeCASError(w, http.StatusInternalServerError, "xorb layout missing")
 			return
@@ -509,7 +509,7 @@ func (s *Service) HandleXorbData(w http.ResponseWriter, r *http.Request) {
 		writeCASError(w, http.StatusBadRequest, "malformed xorb hash")
 		return
 	}
-	f, err := s.store.OpenXorb(hash)
+	f, err := s.store.OpenXorb(r.Context(), hash)
 	if err != nil {
 		writeCASError(w, http.StatusNotFound, "xorb not found")
 		return

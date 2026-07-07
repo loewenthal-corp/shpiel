@@ -166,6 +166,11 @@ type Xet struct {
 	// DataDir is the local directory holding xorbs and reconstruction
 	// records. Content-addressed and global (cross-repo dedup).
 	DataDir string `yaml:"data_dir,omitempty"`
+	// StoreBackend names a configured s3-type backend whose bucket also
+	// holds the xorb store (keys under <backend prefix>/xet/). Exactly one
+	// of data_dir and store_backend is set; a bucket store keeps no local
+	// state, so N replicas can share it.
+	StoreBackend string `yaml:"store_backend,omitempty"`
 }
 
 // Log configures structured logging.
@@ -329,8 +334,20 @@ func (c *Config) Validate() error {
 		errs = append(errs, errors.New("listen.admin requires admin.token_env (the admin API refuses to run unauthenticated)"))
 	}
 
-	if c.Xet.Enabled && c.Xet.DataDir == "" {
-		errs = append(errs, errors.New("xet.enabled requires xet.data_dir"))
+	if c.Xet.Enabled {
+		switch {
+		case c.Xet.DataDir == "" && c.Xet.StoreBackend == "":
+			errs = append(errs, errors.New("xet.enabled requires xet.data_dir or xet.store_backend"))
+		case c.Xet.DataDir != "" && c.Xet.StoreBackend != "":
+			errs = append(errs, errors.New("xet.data_dir and xet.store_backend are mutually exclusive"))
+		}
+	}
+	if c.Xet.StoreBackend != "" {
+		if b, ok := c.Backends[c.Xet.StoreBackend]; !ok {
+			errs = append(errs, fmt.Errorf("xet.store_backend %q is not a configured backend", c.Xet.StoreBackend))
+		} else if b.Type != "s3" {
+			errs = append(errs, fmt.Errorf("xet.store_backend %q must be an s3 backend (is %q)", c.Xet.StoreBackend, b.Type))
+		}
 	}
 
 	switch c.Log.Format {

@@ -78,6 +78,34 @@ func TestEnvOr(t *testing.T) {
 	}
 }
 
+// TestBuildWiresXetBucketStore proves xet.store_backend flows through
+// production wiring: the named s3 backend's bucket becomes the xorb store.
+func TestBuildWiresXetBucketStore(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig(t)
+	cfg.Backends["archive"] = config.BackendConfig{
+		Type: "s3", Bucket: "models", Endpoint: "http://127.0.0.1:1", Prefix: "shpiel",
+	}
+	cfg.Xet = config.Xet{Enabled: true, StoreBackend: "archive"}
+	if _, err := Build(cfg); err != nil {
+		t.Fatalf("Build with xet.store_backend: %v", err)
+	}
+
+	store, err := xetStore(cfg)
+	if err != nil || store == nil {
+		t.Fatalf("xetStore = %v, %v", store, err)
+	}
+	// Local data_dir still works, and a broken endpoint surfaces.
+	if _, err := xetStore(config.Config{Xet: config.Xet{DataDir: t.TempDir()}}); err != nil {
+		t.Errorf("xetStore(data_dir) = %v", err)
+	}
+	bad := cfg
+	bad.Backends = map[string]config.BackendConfig{"archive": {Type: "s3", Bucket: "models", Endpoint: "://bad"}}
+	if _, err := xetStore(bad); err == nil {
+		t.Error("xetStore accepted a broken endpoint")
+	}
+}
+
 func TestBuildReplicationAndAudit(t *testing.T) {
 	t.Parallel()
 	cfg := validConfig(t)

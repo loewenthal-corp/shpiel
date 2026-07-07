@@ -1,36 +1,58 @@
 package xet
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/loewenthal-corp/shpiel/internal/s3client"
 )
 
 // ErrNotFound is returned for unknown xorbs and files.
 var ErrNotFound = errors.New("xet: not found")
 
-// Store is a content-addressed directory of xorbs and file reconstruction
+// Store is a content-addressed collection of xorbs and file reconstruction
 // records:
 //
-//	<root>/xorbs/{xorb-hex}              raw xorb bytes, verbatim as uploaded
-//	<root>/xorbs/{xorb-hex}.chunks.json  cached chunk layout (WalkChunks)
-//	<root>/files/{file-hex}.json         FileRecord (terms + sha256)
-//	<root>/sha256/{sha256-hex}           file containing the xet file hash hex
+//	xorbs/{xorb-hex}              raw xorb bytes, verbatim as uploaded
+//	xorbs/{xorb-hex}.chunks.json  cached chunk layout (WalkChunks)
+//	files/{file-hex}.json         FileRecord (terms + sha256)
+//	sha256/{sha256-hex}           object containing the xet file hash hex
+//
+// The keys live on a byte-persistence layer that is either a local
+// directory (NewStore) or an S3-compatible bucket (NewBucketStore) — the
+// spec's "the S3 backend doubles as the xorb store" story.
 //
 // The store is global (not repo-scoped): hashes are content addresses, so
 // identical chunks pushed to different repos share storage — that is the
 // dedup story xet exists for. Authorization happens at the API layer.
 type Store struct {
-	root string
-	mu   sync.Mutex // serializes multi-file record writes
+	objects objects
+	mu      sync.Mutex // serializes multi-file record writes
 }
 
-// NewStore opens (creating if needed) a store rooted at dir.
+// objects is the byte-persistence layer under Store: small immutable
+// objects addressed by slash-separated keys. Implementations map
+// ErrNotFound onto missing keys.
+type objects interface {
+	has(ctx context.Context, key string) (bool, error)
+	read(ctx context.Context, key string) ([]byte, error)
+	open(ctx context.Context, key string) (io.ReadSeekCloser, error)
+	// write must be atomic: readers never observe a partial object.
+	write(ctx context.Context, key string, data []byte) error
+}
+
+// NewStore opens (creating if needed) a store rooted at a local directory.
 func NewStore(dir string) (*Store, error) {
 	if dir == "" {
 		return nil, errors.New("xet: store dir is required")
@@ -44,28 +66,36 @@ func NewStore(dir string) (*Store, error) {
 			return nil, fmt.Errorf("xet: creating store: %w", err)
 		}
 	}
-	return &Store{root: abs}, nil
+	return &Store{objects: diskObjects{root: abs}}, nil
 }
 
-// Root returns the store directory.
-func (s *Store) Root() string { return s.root }
-
-func (s *Store) xorbPath(h Hash) string { return filepath.Join(s.root, "xorbs", h.Hex()) }
-func (s *Store) filePath(h Hash) string { return filepath.Join(s.root, "files", h.Hex()+".json") }
-func (s *Store) shaPath(sha string) string {
-	return filepath.Join(s.root, "sha256", strings.ToLower(sha))
+// NewBucketStore opens a store on an S3-compatible bucket, keyed under
+// prefix (e.g. "xet"). The bucket persists nothing locally, so N replicas
+// can share one xorb store.
+func NewBucketStore(client *s3client.Client, prefix string) *Store {
+	prefix = strings.Trim(prefix, "/")
+	if prefix != "" {
+		prefix += "/"
+	}
+	return &Store{objects: bucketObjects{client: client, prefix: prefix}}
 }
 
-// HasXorb reports whether a xorb is stored.
-func (s *Store) HasXorb(h Hash) bool {
-	_, err := os.Stat(s.xorbPath(h))
-	return err == nil
+func xorbKey(h Hash) string    { return "xorbs/" + h.Hex() }
+func chunksKey(h Hash) string  { return "xorbs/" + h.Hex() + ".chunks.json" }
+func fileKey(h Hash) string    { return "files/" + h.Hex() + ".json" }
+func shaKey(sha string) string { return "sha256/" + strings.ToLower(sha) }
+
+// HasXorb reports whether a xorb is stored (errors read as absent — the
+// caller's fallback is a re-upload, which is idempotent).
+func (s *Store) HasXorb(ctx context.Context, h Hash) bool {
+	ok, err := s.objects.has(ctx, xorbKey(h))
+	return err == nil && ok
 }
 
 // PutXorb validates and stores a serialized xorb verbatim, caching its
 // chunk layout. Returns false when the xorb was already present.
-func (s *Store) PutXorb(h Hash, data []byte) (bool, error) {
-	if s.HasXorb(h) {
+func (s *Store) PutXorb(ctx context.Context, h Hash, data []byte) (bool, error) {
+	if s.HasXorb(ctx, h) {
 		return false, nil
 	}
 	chunks, err := WalkChunks(data)
@@ -76,22 +106,20 @@ func (s *Store) PutXorb(h Hash, data []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := writeFileAtomic(s.xorbPath(h)+".chunks.json", layout); err != nil {
+	// Layout first: a visible xorb always has its layout.
+	if err := s.objects.write(ctx, chunksKey(h), layout); err != nil {
 		return false, err
 	}
-	if err := writeFileAtomic(s.xorbPath(h), data); err != nil {
+	if err := s.objects.write(ctx, xorbKey(h), data); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 // XorbChunks returns the chunk layout of a stored xorb.
-func (s *Store) XorbChunks(h Hash) ([]ChunkInfo, error) {
-	data, err := os.ReadFile(s.xorbPath(h) + ".chunks.json")
+func (s *Store) XorbChunks(ctx context.Context, h Hash) ([]ChunkInfo, error) {
+	data, err := s.objects.read(ctx, chunksKey(h))
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, ErrNotFound
-		}
 		return nil, err
 	}
 	var chunks []ChunkInfo
@@ -102,28 +130,14 @@ func (s *Store) XorbChunks(h Hash) ([]ChunkInfo, error) {
 }
 
 // OpenXorb opens a stored xorb for reading (supports ranged serving).
-func (s *Store) OpenXorb(h Hash) (*os.File, error) {
-	f, err := os.Open(s.xorbPath(h))
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return f, nil
+func (s *Store) OpenXorb(ctx context.Context, h Hash) (io.ReadSeekCloser, error) {
+	return s.objects.open(ctx, xorbKey(h))
 }
 
 // ReadXorb reads a stored xorb fully into memory (materialization path;
-// xorbs are capped at 64 MiB by the protocol).
-func (s *Store) ReadXorb(h Hash) ([]byte, error) {
-	data, err := os.ReadFile(s.xorbPath(h))
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return data, nil
+// xorb size is capped by the protocol).
+func (s *Store) ReadXorb(ctx context.Context, h Hash) ([]byte, error) {
+	return s.objects.read(ctx, xorbKey(h))
 }
 
 // FileRecord is a stored file reconstruction: the ordered terms plus
@@ -147,22 +161,25 @@ type TermRecord struct {
 }
 
 // PutFile stores a reconstruction record and its sha256 mapping.
-func (s *Store) PutFile(rec *FileRecord) error {
+func (s *Store) PutFile(ctx context.Context, rec *FileRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	h, err := ParseHex(rec.FileHash)
 	if err != nil {
 		return err
 	}
+	if rec.SHA256 != "" && !sha256HexPattern.MatchString(rec.SHA256) {
+		return fmt.Errorf("xet: file record sha256 %q is not a sha256 hex", rec.SHA256)
+	}
 	payload, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := writeFileAtomic(s.filePath(h), payload); err != nil {
+	if err := s.objects.write(ctx, fileKey(h), payload); err != nil {
 		return err
 	}
 	if rec.SHA256 != "" {
-		if err := writeFileAtomic(s.shaPath(rec.SHA256), []byte(rec.FileHash)); err != nil {
+		if err := s.objects.write(ctx, shaKey(rec.SHA256), []byte(rec.FileHash)); err != nil {
 			return err
 		}
 	}
@@ -170,12 +187,9 @@ func (s *Store) PutFile(rec *FileRecord) error {
 }
 
 // File loads a reconstruction record by xet file hash.
-func (s *Store) File(h Hash) (*FileRecord, error) {
-	data, err := os.ReadFile(s.filePath(h))
+func (s *Store) File(ctx context.Context, h Hash) (*FileRecord, error) {
+	data, err := s.objects.read(ctx, fileKey(h))
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, ErrNotFound
-		}
 		return nil, err
 	}
 	var rec FileRecord
@@ -185,24 +199,66 @@ func (s *Store) File(h Hash) (*FileRecord, error) {
 	return &rec, nil
 }
 
+var sha256HexPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+
 // FileHashBySHA256 returns the xet file hash for a content sha256, powering
-// X-Xet-Hash advertisement on resolve.
-func (s *Store) FileHashBySHA256(sha256hex string) (string, bool) {
-	data, err := os.ReadFile(s.shaPath(sha256hex))
+// X-Xet-Hash advertisement on resolve. The input flows from manifest LFS
+// metadata (potentially upstream-controlled), so anything but a sha256 hex
+// is a miss — it must never reach a storage key.
+func (s *Store) FileHashBySHA256(ctx context.Context, sha256hex string) (string, bool) {
+	if !sha256HexPattern.MatchString(sha256hex) {
+		return "", false
+	}
+	data, err := s.objects.read(ctx, shaKey(sha256hex))
 	if err != nil {
 		return "", false
 	}
 	return strings.TrimSpace(string(data)), true
 }
 
-func writeFileAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
+// --- local-directory persistence ---
+
+type diskObjects struct{ root string }
+
+// path maps a store key onto the root. Keys are built from fixed names
+// plus validated hex (ParseHex hashes, the sha256HexPattern guard), so
+// they cannot traverse; the gosec suppressions below record that.
+func (d diskObjects) path(key string) string {
+	return filepath.Join(d.root, filepath.FromSlash(key))
+}
+
+func (d diskObjects) has(_ context.Context, key string) (bool, error) {
+	_, err := os.Stat(d.path(key)) // #nosec G703 -- keys are fixed names + validated hex
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (d diskObjects) read(_ context.Context, key string) ([]byte, error) {
+	data, err := os.ReadFile(d.path(key)) // #nosec G703 -- keys are fixed names + validated hex
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, ErrNotFound
+	}
+	return data, err
+}
+
+func (d diskObjects) open(_ context.Context, key string) (io.ReadSeekCloser, error) {
+	f, err := os.Open(d.path(key)) // #nosec G703 -- keys are fixed names + validated hex
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, ErrNotFound
+	}
+	return f, err
+}
+
+func (d diskObjects) write(_ context.Context, key string, data []byte) error {
+	path := d.path(key)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*") // #nosec G703 -- keys are fixed names + validated hex
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
+	defer func() { _ = os.Remove(tmpName) }() // #nosec G703 -- keys are fixed names + validated hex
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
@@ -210,5 +266,47 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	return os.Rename(tmpName, path) // #nosec G703 -- keys are fixed names + validated hex
+}
+
+// --- bucket persistence ---
+
+type bucketObjects struct {
+	client *s3client.Client
+	prefix string // "" or slash-terminated
+}
+
+func (b bucketObjects) key(key string) string { return b.prefix + key }
+
+func (b bucketObjects) has(ctx context.Context, key string) (bool, error) {
+	_, err := b.client.Head(ctx, b.key(key))
+	if errors.Is(err, s3client.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (b bucketObjects) read(ctx context.Context, key string) ([]byte, error) {
+	rc, err := b.client.Get(ctx, b.key(key), 0)
+	if err != nil {
+		if errors.Is(err, s3client.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
+}
+
+func (b bucketObjects) open(ctx context.Context, key string) (io.ReadSeekCloser, error) {
+	rc, err := b.client.OpenRanged(ctx, b.key(key))
+	if errors.Is(err, s3client.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	return rc, err
+}
+
+func (b bucketObjects) write(ctx context.Context, key string, data []byte) error {
+	sum := sha256.Sum256(data)
+	return b.client.Put(ctx, b.key(key), strings.NewReader(string(data)), int64(len(data)), hex.EncodeToString(sum[:]))
 }

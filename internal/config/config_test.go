@@ -110,6 +110,10 @@ func TestValidateCatchesMistakes(t *testing.T) {
 		{"s3 without bucket", func(c *Config) { c.Backends = map[string]BackendConfig{"x": {Type: "s3", Region: "us-east-1"}} }, "requires bucket"},
 		{"s3 without region or endpoint", func(c *Config) { c.Backends = map[string]BackendConfig{"x": {Type: "s3", Bucket: "b"}} }, "requires region"},
 		{"huggingface unimplemented", func(c *Config) { c.Backends = map[string]BackendConfig{"x": {Type: "huggingface"}} }, "not implemented"},
+		{"xet without any store", func(c *Config) { c.Xet.Enabled = true; c.Xet.DataDir = ""; c.Xet.StoreBackend = "" }, "xet.data_dir or xet.store_backend"},
+		{"xet with both stores", func(c *Config) { c.Xet.Enabled = true; c.Xet.StoreBackend = "local" }, "mutually exclusive"},
+		{"xet store backend unknown", func(c *Config) { c.Xet.DataDir = ""; c.Xet.StoreBackend = "ghost" }, "not a configured backend"},
+		{"xet store backend not s3", func(c *Config) { c.Xet.DataDir = ""; c.Xet.StoreBackend = "local" }, "must be an s3 backend"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,6 +140,11 @@ func TestValidS3Backends(t *testing.T) {
 		cfg.Routes = []Route{{Match: "*", Primary: "archive"}}
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("%s s3 config rejected: %v", name, err)
+		}
+		// The same s3 backend can double as the xet xorb store.
+		cfg.Xet = Xet{Enabled: true, StoreBackend: "archive"}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%s with xet.store_backend rejected: %v", name, err)
 		}
 	}
 }
