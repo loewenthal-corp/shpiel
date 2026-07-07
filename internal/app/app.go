@@ -14,6 +14,7 @@ import (
 	"github.com/loewenthal-corp/shpiel/internal/backend"
 	"github.com/loewenthal-corp/shpiel/internal/backend/fsbackend"
 	"github.com/loewenthal-corp/shpiel/internal/backend/ocibackend"
+	"github.com/loewenthal-corp/shpiel/internal/backend/s3backend"
 	"github.com/loewenthal-corp/shpiel/internal/config"
 	"github.com/loewenthal-corp/shpiel/internal/metrics"
 	"github.com/loewenthal-corp/shpiel/internal/relay"
@@ -72,6 +73,20 @@ func Build(cfg config.Config) (*App, error) {
 				RepoPrefix: bc.RepoPrefix,
 				Username:   os.Getenv(bc.Auth.UsernameEnv),
 				Password:   os.Getenv(bc.Auth.PasswordEnv),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("backend %q: %w", name, err)
+			}
+			backends[name] = b
+		case "s3":
+			b, err := s3backend.New(name, s3backend.Options{
+				Endpoint:        bc.Endpoint,
+				Bucket:          bc.Bucket,
+				Region:          bc.Region,
+				Prefix:          bc.Prefix,
+				AccessKeyID:     os.Getenv(envOr(bc.Auth.AccessKeyIDEnv, "AWS_ACCESS_KEY_ID")),
+				SecretAccessKey: os.Getenv(envOr(bc.Auth.SecretAccessKeyEnv, "AWS_SECRET_ACCESS_KEY")),
+				SessionToken:    os.Getenv(envOr(bc.Auth.SessionTokenEnv, "AWS_SESSION_TOKEN")),
 			})
 			if err != nil {
 				return nil, fmt.Errorf("backend %q: %w", name, err)
@@ -165,6 +180,14 @@ func Build(cfg config.Config) (*App, error) {
 		Audit:       auditLog,
 		Log:         log,
 	}, nil
+}
+
+// envOr returns name when set, else the conventional fallback env name.
+func envOr(name, fallback string) string {
+	if name == "" {
+		return fallback
+	}
+	return name
 }
 
 // replicatorOrNil avoids handing the relay a typed-nil interface.

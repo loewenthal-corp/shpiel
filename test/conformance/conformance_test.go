@@ -17,6 +17,7 @@ import (
 	"github.com/loewenthal-corp/shpiel/internal/app"
 	"github.com/loewenthal-corp/shpiel/internal/config"
 	"github.com/loewenthal-corp/shpiel/internal/fakehub"
+	"github.com/loewenthal-corp/shpiel/internal/fakes3"
 )
 
 // newShpiel builds a full Shpiel (production wiring via app.Build) on a
@@ -217,6 +218,74 @@ func TestConformancePullThroughOCI(t *testing.T) {
 			Run(t, url, fx)
 		})
 	}
+}
+
+// newShpielS3 builds a Shpiel whose primary backend is an S3 bucket
+// (in-process fakes3 with SigV4 verification on). No t.Parallel in its
+// callers: credentials flow through t.Setenv.
+func newShpielS3(t *testing.T, upstreamURL string) string {
+	t.Helper()
+	fake := fakes3.New("models-archive", "AKIDCONFORMANCE", "conformance-secret")
+	reg := httptest.NewServer(fake)
+	t.Cleanup(reg.Close)
+	t.Setenv("CONF_S3_ACCESS_KEY", "AKIDCONFORMANCE")
+	t.Setenv("CONF_S3_SECRET_KEY", "conformance-secret")
+
+	cfg := config.Default()
+	cfg.Listen.Metrics = ""
+	cfg.Log.Format = "text"
+	cfg.Log.Level = "warn"
+	cfg.Backends = map[string]config.BackendConfig{
+		"archive": {
+			Type:     "s3",
+			Bucket:   "models-archive",
+			Endpoint: reg.URL,
+			Prefix:   "shpiel",
+			Auth: config.BackendAuth{ // #nosec G101 -- env var names, not credentials
+				AccessKeyIDEnv:     "CONF_S3_ACCESS_KEY",
+				SecretAccessKeyEnv: "CONF_S3_SECRET_KEY",
+			},
+		},
+	}
+	cfg.Routes = []config.Route{{Match: "*", Primary: "archive"}}
+	if upstreamURL != "" {
+		cfg.Upstream.HuggingFace.PullThrough = true
+		cfg.Upstream.HuggingFace.Endpoint = upstreamURL
+		cfg.Upstream.HuggingFace.RefreshInterval = time.Hour
+	}
+	a, err := app.Build(cfg)
+	if err != nil {
+		t.Fatalf("app.Build: %v", err)
+	}
+	srv := httptest.NewServer(a.Server.Handler())
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// TestConformanceWriteThenReadS3 proves the bucket backend end to end:
+// the full HF write protocol lands a model in an S3 bucket (SigV4-signed
+// all the way), and the identical read contract is served back from those
+// objects.
+func TestConformanceWriteThenReadS3(t *testing.T) {
+	url := newShpielS3(t, "")
+	fx, err := NewWriteClient(url, "").PushFixture(BasicFixture())
+	if err != nil {
+		t.Fatalf("PushFixture: %v", err)
+	}
+	Run(t, url, fx)
+}
+
+// TestConformancePullThroughS3 runs the read contract against a Shpiel
+// that pulls through from fakehub straight into a bucket — manifests
+// landing before their blobs, blobs arriving lazily.
+func TestConformancePullThroughS3(t *testing.T) {
+	hub := fakehub.New()
+	hubSrv := httptest.NewServer(hub.Handler())
+	t.Cleanup(hubSrv.Close)
+	fx := SeedHub(hub, BasicFixture())
+
+	url := newShpielS3(t, hubSrv.URL)
+	Run(t, url, fx)
 }
 
 // TestReplicationFanOutAndAudit pushes through the full write protocol on

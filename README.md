@@ -4,9 +4,9 @@
 speaks the Hugging Face Hub API — read, write, and Xet — so
 `push_to_hub()` lands weights as versioned, content-addressed OCI
 artifacts in the registry your cluster already runs, ready for image
-volumes and P2P distribution. (A filesystem backend ships too; object
-storage is next.) Every existing HF tool works unchanged by setting one
-environment variable:
+volumes and P2P distribution. (Filesystem and S3-compatible object
+storage backends ship too.) Every existing HF tool works unchanged by
+setting one environment variable:
 
 ```bash
 export HF_ENDPOINT=https://shpiel.internal
@@ -41,7 +41,8 @@ peer-to-peer pull from neighboring nodes. See
 ```diagram
 researchers ── HF API (read / write / Xet) ──▶ Shpiel ──▶ backends
 inference engines ◀── HF API (reads, ranges) ──┘   │        ├─ OCI registry (Zot, Harbor)
-                                                   │        └─ filesystem / NFS / PVC
+                                                   │        ├─ filesystem / NFS / PVC
+                                                   │        └─ S3 / GCS / MinIO / R2
                                      huggingface.co (pull-through / mirror)
 ```
 
@@ -63,6 +64,9 @@ inference engines ◀── HF API (reads, ranges) ──┘   │        ├─
 - **Filesystem backend.** Byte-compatible with the `huggingface_hub`
   cache: mount the volume, set `HF_HUB_OFFLINE=1`, and `from_pretrained`
   reads it directly.
+- **S3 backend.** Content-addressed blobs in any S3-compatible bucket —
+  AWS S3, GCS in interop mode, MinIO, Ceph, R2 — as a primary store or as
+  the archive replica behind an OCI primary. Hand-rolled SigV4, no SDK.
 - **Fan-out replication.** Routes can declare replicas (a second registry,
   another cluster); pushes replicate asynchronously through a disk-spooled
   retry queue. No database, restart-safe.
@@ -129,13 +133,14 @@ real binary. If it regresses, CI fails.
 
 ## Status
 
-**v0.1.0 is out.** The read path, write path, Xet server, OCI and
-filesystem backends, pull-through, replication, and the ops surface
-described above are all shipped and covered by conformance + e2e tests.
+**v0.1.0 is out.** The read path, write path, Xet server, OCI,
+filesystem, and S3 backends, pull-through, replication, and the ops
+surface described above are all shipped and covered by conformance + e2e
+tests.
 
-On the roadmap: an S3/GCS backend (doubling as the Xet xorb store),
-global chunk-level dedup queries, dataset repos, mintable local tokens and
-OIDC for air-gapped auth, and published Spegel benchmark numbers. The
+On the roadmap: the S3 backend doubling as the Xet xorb store, global
+chunk-level dedup queries, dataset repos, mintable local tokens and OIDC
+for air-gapped auth, and published Spegel benchmark numbers. The
 [spec](spec.md) tracks the details.
 
 ## Shpiel vs. the alternatives

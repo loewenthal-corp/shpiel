@@ -41,11 +41,21 @@ backends:
   #     format: tar-layers
   #     repo_prefix: ""            # optional path prefix for OCI repo names
   #     auth: { username_env: ZOT_USER, password_env: ZOT_PASS }
-  # Coming in M1.x:
+  # S3-compatible object storage (AWS S3, GCS interop, MinIO, Ceph, R2):
+  # content-addressed blobs plus manifest/ref objects under
+  # [prefix/]models/org/name/. Credentials come from the named env vars,
+  # falling back to AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
+  # AWS_SESSION_TOKEN; requests go unsigned when those are empty too.
   #   archive:
   #     type: s3
   #     bucket: models-archive
-  #     region: us-central1
+  #     region: us-east-1              # SigV4 region; required for AWS
+  #     # endpoint: https://minio.internal:9000  # S3-compatible services
+  #     #                                        # (path-style addressing)
+  #     # prefix: shpiel               # key prefix, for sharing a bucket
+  #     # auth:
+  #     #   access_key_id_env: ARCHIVE_ACCESS_KEY_ID
+  #     #   secret_access_key_env: ARCHIVE_SECRET_ACCESS_KEY
   cache:
     type: fs
     # HF-cache-compatible layout: mount this path (PVC/NFS) into pods and

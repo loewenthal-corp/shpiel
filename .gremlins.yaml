@@ -10,4 +10,5 @@ unleash:
     - "test/conformance/"
     - "internal/fakehub/"
     - "internal/fakeregistry/"
+    - "internal/fakes3/"
     - "cmd/fakehub/"

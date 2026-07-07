@@ -4,9 +4,10 @@ Shpiel is an HF-to-OCI model relay: it speaks the Hugging Face Hub API
 on the front — read, write, and the Xet protocol (so `hf`,
 `huggingface_hub` 0.x and 1.x, vLLM, SGLang, and TGI work unchanged with
 `HF_ENDPOINT` set) — and lands models as OCI artifacts in registries
-(Zot/Harbor) on the back; a filesystem backend (HF-cache layout) ships
-too, S3 and upstream HF mirroring next. See [spec.md](spec.md) for the full
-product spec and milestones (M0, M1, and M3/M4-core are done).
+(Zot/Harbor) on the back; filesystem (HF-cache layout) and S3-compatible
+object storage backends ship too, upstream HF mirroring next. See
+[spec.md](spec.md) for the full product spec and milestones (M0, M1, and
+M3/M4-core are done).
 
 ## Architecture in one pass
 
@@ -23,6 +24,10 @@ internal/relay      backend-first reads; pull-through on miss (singleflight);
    │      │                          mountable tar-layers; staged→promoted commits)
    │      └── internal/ociclient     minimal distribution-spec client (ranged
    │                                 reads, chunked streaming uploads)
+   ├── internal/backend/s3backend    S3-compatible buckets (AWS/GCS/MinIO/R2):
+   │      │                          blob/manifest/ref objects, spool-verified PUTs
+   │      └── internal/s3client      minimal S3 REST client, hand-rolled SigV4
+   │                                 (fakes3 is its strict in-process test double)
    ├── internal/xet                  Xet protocol server: CAS API (xorb/shard
    │                                 ingest + reconstruction), format parsers,
    │                                 content-addressed store; ingested files
@@ -68,10 +73,11 @@ gate on the PR diff, and fails on uncommitted generated files.
    the HF API. The same read contract runs against every serving
    configuration: direct-seeded FS (cache hit), pull-through-from-fakehub
    (cache miss), write-then-read (the full write protocol pushes the
-   fixture, then the read contract runs on what landed), and all of those
-   again on the OCI backend in both formats. Every configuration must stay
-   contract-identical. Point it at any live endpoint with
-   `SHPIEL_CONFORMANCE_URL`.
+   fixture, then the read contract runs on what landed), all of those
+   again on the OCI backend in both formats, and write-then-read +
+   pull-through on the S3 backend (SigV4-verified fakes3). Every
+   configuration must stay contract-identical. Point it at any live
+   endpoint with `SHPIEL_CONFORMANCE_URL`.
 2. **e2e** (`test/e2e`, `-tags e2e`) starts the real compiled binary and
    drives it with the real Python `huggingface_hub` + `hf` CLI (and real
    `hf_xet`) in Docker: pull-through downloads (`E2E_OK`), LFS uploads
