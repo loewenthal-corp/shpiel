@@ -18,7 +18,7 @@ function html(body: string, status = 200): Response {
 }
 
 export default {
-  async fetch(request): Promise<Response> {
+  async fetch(request, _env, ctx): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.hostname === "www.shpiel.dev") {
@@ -28,15 +28,15 @@ export default {
 
     switch (url.pathname) {
       case "/": {
-        const [stars, releases] = await Promise.all([fetchStars(), fetchReleases()]);
+        const [stars, releases] = await Promise.all([fetchStars(ctx), fetchReleases(ctx)]);
         return html(homePage(stars, latestRelease(releases)));
       }
       case "/releases": {
-        const [stars, releases] = await Promise.all([fetchStars(), fetchReleases()]);
+        const [stars, releases] = await Promise.all([fetchStars(ctx), fetchReleases(ctx)]);
         return html(releasesPage(stars, releases));
       }
       default:
-        return html(notFoundPage(await fetchStars()), 404);
+        return html(notFoundPage(await fetchStars(ctx)), 404);
     }
   },
 } satisfies ExportedHandler;
