@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/loewenthal-corp/shpiel/compare/v0.2.0...v0.3.0) (2026-07-16)
+
+
+### Features
+
+* **s3:** ambient AWS credentials — IRSA web identity, no static keys ([#35](https://github.com/loewenthal-corp/shpiel/issues/35)) ([5b7224a](https://github.com/loewenthal-corp/shpiel/commit/5b7224a362f119765e59c26ff22dfcc6d98606e4))
+* **xet:** global chunk-deduplication query + dedup metrics ([#38](https://github.com/loewenthal-corp/shpiel/issues/38)) ([2b0cadb](https://github.com/loewenthal-corp/shpiel/commit/2b0cadbdc3121626e47dd0b3c55d81dd2d34ee9e))
+* **xet:** xorb store on s3 — the bucket doubles as the CAS store ([#34](https://github.com/loewenthal-corp/shpiel/issues/34)) ([d906dba](https://github.com/loewenthal-corp/shpiel/commit/d906dba3a9d065a66026c240c88931b2766df934))
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/alecthomas/kong to v1.16.0 ([#49](https://github.com/loewenthal-corp/shpiel/issues/49)) ([527b0d0](https://github.com/loewenthal-corp/shpiel/commit/527b0d03d4eafb71a37f8b26bc3a5016546c72be))
+* **deps:** update module golang.org/x/sync to v0.22.0 ([#39](https://github.com/loewenthal-corp/shpiel/issues/39)) ([ac4ee18](https://github.com/loewenthal-corp/shpiel/commit/ac4ee182a6116fbe2e941297ee6d7eb7152dd411))
+* **renovate:** stop pinDigests from mangling the chart's own image tag ([#36](https://github.com/loewenthal-corp/shpiel/issues/36)) ([1123acd](https://github.com/loewenthal-corp/shpiel/commit/1123acd69f8021cce6cfc87b0095089dab6b0e01))
+
 ## [0.2.0](https://github.com/loewenthal-corp/shpiel/compare/v0.1.1...v0.2.0) (2026-07-07)
 
 
