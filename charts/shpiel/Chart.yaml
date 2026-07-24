@@ -4,7 +4,7 @@ description: >-
   HF-to-OCI model relay: the Hugging Face Hub API (read, write, Xet) on the
   front, models stored as OCI artifacts (or on a filesystem) on the back.
 type: application
-version: 0.3.0
+version: 0.3.1
 appVersion: 0.0.1
 home: https://github.com/loewenthal-corp/shpiel
 sources:
