@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/loewenthal-corp/shpiel/compare/v0.3.0...v0.3.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/prometheus/client_golang to v1.24.0 ([#64](https://github.com/loewenthal-corp/shpiel/issues/64)) ([6151f68](https://github.com/loewenthal-corp/shpiel/commit/6151f684d53c39db84ccd57187921d11777c50e0))
+
 ## [0.3.0](https://github.com/loewenthal-corp/shpiel/compare/v0.2.0...v0.3.0) (2026-07-16)
 
 
