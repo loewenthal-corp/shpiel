@@ -30,15 +30,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+        with:
+          cache: "true"
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
         with:
           languages: ${{ matrix.language }}
-          # Buildless extraction: the toolchain comes only from Hermit and
-          # ships a static (CGO_ENABLED=0) binary the CodeQL tracer cannot
-          # observe, so tracing a manual build sees no Go code. `none` parses
-          # source directly and avoids the tracer entirely.
-          build-mode: none
+          # Go only supports autobuild/manual. Let CodeQL drive its own
+          # traced `go build ./...` (Hermit puts go on PATH) rather than the
+          # repo's static CGO_ENABLED=0 build, which the tracer can't observe.
+          build-mode: autobuild
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3

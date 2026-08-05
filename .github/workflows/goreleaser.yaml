@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      # Keyless cosign signing mints a short-lived Sigstore cert from this
+      # OIDC token.
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -24,6 +27,9 @@ jobs:
         uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
         with:
           cache: "true"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
 
       - name: Build and attach release binaries
         run: goreleaser release --clean
