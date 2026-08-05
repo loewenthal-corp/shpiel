@@ -1,0 +1,50 @@
+---
+name: codeql
+
+"on":
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: '27 10 * * 6'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    permissions:
+      # Required to upload results to the code-scanning dashboard.
+      security-events: write
+      # Only required for workflows in private repositories.
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["go"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+        with:
+          cache: "true"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: manual
+
+      - name: Build
+        run: task build
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -15,3 +15,8 @@ allowBuilds:
   esbuild: true
   sharp: false
   workerd: true
+# Force the transitive undici (via wrangler/miniflare) off versions with
+# known advisories. Mirrored in package.json's pnpm.overrides so the older
+# pnpm on Cloudflare Workers Builds applies the same pin.
+overrides:
+  undici@<7.29.0: 7.29.0
