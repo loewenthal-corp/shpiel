@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.1](https://github.com/loewenthal-corp/shpiel/compare/v0.3.0...v0.3.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/google/go-containerregistry to v0.21.8 ([#86](https://github.com/loewenthal-corp/shpiel/issues/86)) ([ea72962](https://github.com/loewenthal-corp/shpiel/commit/ea72962da0557e18c6f700318ae2f13b22e19fd6))
+* **deps:** update module github.com/google/go-containerregistry to v0.21.9 ([#100](https://github.com/loewenthal-corp/shpiel/issues/100)) ([f33ea66](https://github.com/loewenthal-corp/shpiel/commit/f33ea6662b3f0746ba7f6fedf5c37beec4467903))
+* **deps:** update module github.com/pierrec/lz4/v4 to v4.1.28 ([#95](https://github.com/loewenthal-corp/shpiel/issues/95)) ([092a291](https://github.com/loewenthal-corp/shpiel/commit/092a29108efb65ef0e970c2581ea4602e36ac9fe))
+* **deps:** update module github.com/prometheus/client_golang to v1.24.0 ([#64](https://github.com/loewenthal-corp/shpiel/issues/64)) ([6151f68](https://github.com/loewenthal-corp/shpiel/commit/6151f684d53c39db84ccd57187921d11777c50e0))
+* **deps:** update module github.com/prometheus/client_golang to v1.24.1 ([#70](https://github.com/loewenthal-corp/shpiel/issues/70)) ([b2353af](https://github.com/loewenthal-corp/shpiel/commit/b2353af62f709b6b0ad01a11c5109763bfcc8286))
+
 ## [0.3.0](https://github.com/loewenthal-corp/shpiel/compare/v0.2.0...v0.3.0) (2026-07-16)
 
 
