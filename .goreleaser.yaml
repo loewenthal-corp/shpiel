@@ -40,6 +40,28 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Keyless (Sigstore/Fulcio) cosign signature over the checksums file, so
+# every archive is transitively verifiable. Needs cosign on PATH and
+# `id-token: write` in the release workflow; no long-lived keys or secrets.
+# Verify with:
+#   cosign verify-blob --certificate checksums.txt.pem \
+#     --signature checksums.txt.sig \
+#     --certificate-identity-regexp 'https://github.com/loewenthal-corp/shpiel/.*' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     checksums.txt
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    signature: "${artifact}.sig"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+    artifacts: checksum
+    output: true
+
 changelog:
   # release-please owns the release notes.
   disable: true

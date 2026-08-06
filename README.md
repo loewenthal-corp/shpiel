@@ -1,5 +1,9 @@
 # Shpiel
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/loewenthal-corp/shpiel/badge)](https://scorecard.dev/viewer/?uri=github.com/loewenthal-corp/shpiel)
+[![CI](https://github.com/loewenthal-corp/shpiel/actions/workflows/ci.yaml/badge.svg)](https://github.com/loewenthal-corp/shpiel/actions/workflows/ci.yaml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 **Push Hugging Face models straight into your OCI registry.** Shpiel
 speaks the Hugging Face Hub API — read, write, and Xet — so
 `push_to_hub()` lands weights as versioned, content-addressed OCI
