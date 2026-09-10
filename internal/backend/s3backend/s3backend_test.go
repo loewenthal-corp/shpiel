@@ -502,6 +502,13 @@ func TestPathValidation(t *testing.T) {
 	if err := b.PutManifest(ctx, &backend.Manifest{}, nil); err == nil {
 		t.Error("PutManifest accepted empty manifest")
 	}
+	for _, bad := range []string{"../../../../tmp/escape", "not-a-sha"} {
+		m := testManifest("org/repo", map[string][]byte{"ok": []byte("1")})
+		m.CommitSHA = bad
+		if err := b.PutManifest(ctx, m, nil); err == nil {
+			t.Errorf("PutManifest accepted CommitSHA %q", bad)
+		}
+	}
 	if _, err := b.ResolveRef(ctx, hfapi.RepoKindModel, id, "../../etc"); err == nil {
 		t.Error("ResolveRef accepted traversal ref")
 	}

@@ -154,8 +154,8 @@ func (b *Backend) GetManifest(ctx context.Context, kind hfapi.RepoKind, repo hfa
 // materializes the snapshot directory (symlinks for blobs already present),
 // and updates refs atomically.
 func (b *Backend) PutManifest(ctx context.Context, m *backend.Manifest, refs map[string]string) error {
-	if m.Repo.IsZero() || m.CommitSHA == "" {
-		return errors.New("fsbackend: manifest requires repo and commit SHA")
+	if m.Repo.IsZero() || m.CommitSHA == "" || !hfapi.IsCommitSHA(m.CommitSHA) {
+		return errors.New("fsbackend: manifest requires repo and a valid commit SHA")
 	}
 	kind := m.Kind
 	if kind == "" {
