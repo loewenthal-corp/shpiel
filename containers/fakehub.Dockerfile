@@ -1,6 +1,6 @@
 # fakehub: hermetic huggingface.co simulator for the dev environment and
 # e2e tests. Never shipped.
-FROM golang:1.26@sha256:ae5a2316d12f3e78fd99177dad452e6ad4f240af2d71d57b480c3477f250fec6 AS build
+FROM golang:1.26@sha256:3c3e25a4da13fd0478eed2df1eb35a0e667094a7124d3993a6a1d30f71c17e79 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
