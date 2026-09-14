@@ -230,8 +230,8 @@ func (b *Backend) GetManifest(ctx context.Context, kind hfapi.RepoKind, repo hfa
 // PutManifest implements backend.Backend: the manifest object first, then
 // the refs pointing at it (readers never see a ref without its manifest).
 func (b *Backend) PutManifest(ctx context.Context, m *backend.Manifest, refs map[string]string) error {
-	if m.Repo.IsZero() || m.CommitSHA == "" {
-		return errors.New("s3backend: manifest requires repo and commit SHA")
+	if m.Repo.IsZero() || m.CommitSHA == "" || !hfapi.IsCommitSHA(m.CommitSHA) {
+		return errors.New("s3backend: manifest requires repo and a valid commit SHA")
 	}
 	kind := m.Kind
 	if kind == "" {

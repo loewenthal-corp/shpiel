@@ -40,6 +40,40 @@ func manifestFor(repo hfapi.RepoID, kind hfapi.RepoKind, path string, content []
 	}
 }
 
+// TestPutManifestRejectsInvalidCommitSHA: PutManifest must refuse a
+// traversal-shaped or non-SHA CommitSHA before joining it into a path,
+// while a 40-hex SHA still lands.
+func TestPutManifestRejectsInvalidCommitSHA(t *testing.T) {
+	t.Parallel()
+	b := newEdgeBackend(t)
+	repo, _ := hfapi.ParseRepoID("org/sha")
+	ctx := context.Background()
+
+	for _, bad := range []string{"../../../../tmp/escape", "not-a-sha"} {
+		m := manifestFor(repo, hfapi.RepoKindModel, "a.txt", []byte("x"))
+		m.CommitSHA = bad
+		if err := b.PutManifest(ctx, m, nil); err == nil {
+			t.Errorf("PutManifest accepted CommitSHA %q", bad)
+		}
+	}
+
+	entries, err := os.ReadDir(b.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("rejected PutManifest wrote under the store root: %v", entries)
+	}
+
+	good := manifestFor(repo, hfapi.RepoKindModel, "a.txt", []byte("x"))
+	if err := b.PutManifest(ctx, good, map[string]string{"main": testSHA}); err != nil {
+		t.Fatalf("valid SHA rejected: %v", err)
+	}
+	if sha, err := b.ResolveRef(ctx, hfapi.RepoKindModel, repo, "main"); err != nil || sha != testSHA {
+		t.Fatalf("ref after valid put = %s, %v", sha, err)
+	}
+}
+
 // TestPutManifestDefaultsKind: a manifest without a kind lands in the model
 // namespace, where model reads find it.
 func TestPutManifestDefaultsKind(t *testing.T) {
