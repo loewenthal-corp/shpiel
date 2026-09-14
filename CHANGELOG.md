@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/loewenthal-corp/shpiel/compare/v0.3.1...v0.3.2) (2026-09-14)
+
+
+### Bug Fixes
+
+* **backend:** reject non-SHA commit SHAs in fsbackend and s3backend PutManifest ([#110](https://github.com/loewenthal-corp/shpiel/issues/110)) ([8599716](https://github.com/loewenthal-corp/shpiel/commit/85997167e63ddbfd178fea05a7d29ac66c9d6711))
+
 ## [0.3.1](https://github.com/loewenthal-corp/shpiel/compare/v0.3.0...v0.3.1) (2026-08-06)
 
 
