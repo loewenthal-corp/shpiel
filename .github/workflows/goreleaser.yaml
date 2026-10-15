@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release-binaries:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
       # Keyless cosign signing mints a short-lived Sigstore cert from this
