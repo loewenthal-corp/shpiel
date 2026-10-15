@@ -3,7 +3,7 @@ module github.com/loewenthal-corp/shpiel
 go 1.26.4
 
 require (
-	github.com/alecthomas/kong v1.16.0
+	github.com/alecthomas/kong v1.16.1
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/google/go-containerregistry v0.21.9
 	github.com/pierrec/lz4/v4 v4.1.28
