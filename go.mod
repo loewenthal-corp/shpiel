@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/bmatcuk/doublestar/v4 v4.10.3
-	github.com/google/go-containerregistry v0.21.9
+	github.com/google/go-containerregistry v0.22.1
 	github.com/pierrec/lz4/v4 v4.1.33
 	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/sync v0.22.0
