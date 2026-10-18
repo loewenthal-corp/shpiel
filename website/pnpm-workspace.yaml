@@ -8,4 +8,4 @@ allowBuilds:
 # known advisories. Mirrored in package.json's pnpm.overrides so the older
 # pnpm on Cloudflare Workers Builds applies the same pin.
 overrides:
-  undici@<7.29.0: 7.30.0
+  undici@<7.29.0: 7.30.1
