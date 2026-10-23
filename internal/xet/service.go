@@ -241,7 +241,7 @@ func (s *Service) HandleShardUpload(w http.ResponseWriter, r *http.Request) {
 			// Operator-provided debug dir; the file name is fully
 			// server-generated.
 			dump := filepath.Join(filepath.Clean(dir), fmt.Sprintf("rejected-shard-%d.bin", time.Now().UnixNano()))
-			_ = os.WriteFile(dump, body, 0o644)
+			_ = os.WriteFile(dump, body, 0o644) // #nosec G703 -- operator-set dir, server-generated file name
 			s.log.WarnContext(r.Context(), "rejected shard dumped", "path", dump)
 		}
 		s.log.WarnContext(r.Context(), "xet shard rejected", "error", err, "bytes", len(body))
