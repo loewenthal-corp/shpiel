@@ -111,9 +111,16 @@ func DecodeChunk(chunk []byte) ([]byte, error) {
 	}
 }
 
+// validChunkRange reports whether [start, end) is a non-empty interval
+// inside a sequence of total chunks. Materialization and reconstruction
+// share this check so a stored term is never indexed out of range.
+func validChunkRange(start, end, total int) bool {
+	return start >= 0 && end <= total && start < end
+}
+
 // DecodeChunkRange decompresses chunks [start, end) of a xorb into w.
 func DecodeChunkRange(xorb []byte, chunks []ChunkInfo, start, end int, w io.Writer) error {
-	if start < 0 || end > len(chunks) || start >= end {
+	if !validChunkRange(start, end, len(chunks)) {
 		return fmt.Errorf("xet: chunk range [%d, %d) out of bounds (0..%d)", start, end, len(chunks))
 	}
 	for i := start; i < end; i++ {
