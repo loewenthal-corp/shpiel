@@ -503,6 +503,11 @@ func TestTreePaginationEdges(t *testing.T) {
 	if entries, link := page("?cursor=" + base64.URLEncoding.EncodeToString([]byte("999"))); len(entries) != 0 || link != "" {
 		t.Errorf("past-the-end cursor = %d entries, link %q", len(entries), link)
 	}
+	// A cursor at MaxInt is past the end too. It must not overflow the
+	// page window into a panic; the response is an empty page with no Link.
+	if entries, link := page("?cursor=" + base64.URLEncoding.EncodeToString([]byte("9223372036854775807"))); len(entries) != 0 || link != "" {
+		t.Errorf("overflowing cursor = %d entries, link %q", len(entries), link)
+	}
 
 	// File entries carry the git blob OID, not the storage digest.
 	entries, _ := page("")
