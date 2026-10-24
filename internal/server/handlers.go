@@ -112,12 +112,12 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 	// Clamp before adding limit: a cursor near MaxInt overflows the sum
 	// and would invert the slice bounds.
 	offset = min(offset, len(entries))
+	end := min(offset+limit, len(entries))
 	if subpath != "" && len(entries) == 0 {
 		writeHFError(w, http.StatusNotFound, hfapi.ErrorCodeEntryNotFound, "Entry not found.")
 		return
 	}
 
-	end := min(offset+limit, len(entries))
 	page := entries[offset:end]
 	if end < len(entries) {
 		next := *r.URL
