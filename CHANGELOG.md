@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.3](https://github.com/loewenthal-corp/shpiel/compare/v0.3.2...v0.3.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/alecthomas/kong to v1.16.1 ([#122](https://github.com/loewenthal-corp/shpiel/issues/122)) ([cff3e62](https://github.com/loewenthal-corp/shpiel/commit/cff3e62ecf27bf5b36f38ec6ef43b498458051c1))
+* **deps:** update module github.com/bmatcuk/doublestar/v4 to v4.10.3 ([#123](https://github.com/loewenthal-corp/shpiel/issues/123)) ([0de8e0f](https://github.com/loewenthal-corp/shpiel/commit/0de8e0f65e48c7c798c20fd5fb51f8940501d64c))
+* **deps:** update module github.com/bmatcuk/doublestar/v4 to v4.10.4 ([#172](https://github.com/loewenthal-corp/shpiel/issues/172)) ([facaabe](https://github.com/loewenthal-corp/shpiel/commit/facaabe512a9c669f3ead1beaaaf95e008ad3300))
+* **deps:** update module github.com/google/go-containerregistry to v0.22.1 ([#141](https://github.com/loewenthal-corp/shpiel/issues/141)) ([a4a36d2](https://github.com/loewenthal-corp/shpiel/commit/a4a36d2bac9b1e76f7735cec3ac2c84c1eb968cc))
+* **deps:** update module github.com/pierrec/lz4/v4 to v4.1.33 ([#124](https://github.com/loewenthal-corp/shpiel/issues/124)) ([c842645](https://github.com/loewenthal-corp/shpiel/commit/c842645e527760b638a87ff0b65cadd2215045f9))
+* **deps:** update module github.com/prometheus/client_golang to v1.25.0 ([#142](https://github.com/loewenthal-corp/shpiel/issues/142)) ([f91071d](https://github.com/loewenthal-corp/shpiel/commit/f91071db1ad1c5586969c1baf2e46608a6cf21b5))
+* **deps:** update module golang.org/x/sync to v0.24.0 ([#143](https://github.com/loewenthal-corp/shpiel/issues/143)) ([e57a6da](https://github.com/loewenthal-corp/shpiel/commit/e57a6da3b0119ac89e24b14c1ed244aec1851100))
+
 ## [0.3.2](https://github.com/loewenthal-corp/shpiel/compare/v0.3.1...v0.3.2) (2026-10-15)
 
 
