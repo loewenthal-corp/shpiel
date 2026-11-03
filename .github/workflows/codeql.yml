@@ -36,7 +36,7 @@ jobs:
           cache: "true"
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
+        uses: github/codeql-action/init@a3d1b77a1ba1550fbb5c74db1dc3a11f4a481126 # v3
         with:
           languages: ${{ matrix.language }}
           # Go only supports autobuild/manual. Let CodeQL drive its own
@@ -45,6 +45,6 @@ jobs:
           build-mode: autobuild
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
+        uses: github/codeql-action/analyze@a3d1b77a1ba1550fbb5c74db1dc3a11f4a481126 # v3
         with:
           category: "/language:${{ matrix.language }}"
