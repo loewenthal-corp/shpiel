@@ -447,8 +447,8 @@ func (s *Service) HandleReconstruction(w http.ResponseWriter, r *http.Request) {
 			writeCASError(w, http.StatusInternalServerError, "xorb layout missing")
 			return
 		}
-		if term.ChunkEnd > len(chunks) {
-			writeCASError(w, http.StatusInternalServerError, "term chunk range exceeds xorb")
+		if !validChunkRange(term.ChunkStart, term.ChunkEnd, len(chunks)) {
+			writeCASError(w, http.StatusInternalServerError, "term chunk range out of bounds")
 			return
 		}
 		chunkRange := indexRange{Start: term.ChunkStart, End: term.ChunkEnd}
