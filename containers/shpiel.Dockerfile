@@ -1,7 +1,7 @@
 # Build the shpiel binary: static, CGO-free, distroless runtime.
 # Multi-arch: the build stage runs on the build host's platform and
 # cross-compiles for $TARGETARCH, so arm64 images do not pay the QEMU tax.
-FROM --platform=$BUILDPLATFORM golang:1.27@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27@sha256:e519d3b0a5b285e5aa53ab9eef02bc6bbb9cb04608389b743a136a9ce75f0d1e AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
