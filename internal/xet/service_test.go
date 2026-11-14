@@ -528,6 +528,80 @@ func testReconstructionAndDataURL(t *testing.T, store *Store) {
 	}
 }
 
+// TestReconstructionRejectsOutOfRangeChunkTerm: a shard may store a file
+// term whose chunk range is inverted or past the xorb. The range is not
+// known at parse time, and materialize no-ops when the file has no sha256,
+// so the upload succeeds. Reconstruction must answer with a CAS error
+// instead of indexing the xorb layout out of range.
+func TestReconstructionRejectsOutOfRangeChunkTerm(t *testing.T) {
+	t.Parallel()
+	svc, mux := newTestService(t, newMemMaterializer())
+	repo, _ := hfapi.ParseRepoID("org/bad-range")
+	writeTok, _ := svc.MintToken("write", hfapi.RepoKindModel, repo, "alice")
+	readTok, _ := svc.MintToken("read", hfapi.RepoKindModel, repo, "alice")
+
+	xorbHex := uploadTestXorb(t, mux, writeTok, []byte("aaaaAAAA"), []byte("bbbbBBBB"))
+	xorbHash, err := ParseHex(xorbHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Each case fails a different clause of validChunkRange against a
+	// two-chunk xorb: an inverted range (start < end) and a start past
+	// the chunk count (end <= total).
+	cases := []struct {
+		name       string
+		file       string
+		start, end int
+	}{
+		{name: "inverted", file: strings.Repeat("e1", 32), start: 5, end: 0},
+		{name: "start beyond chunk count", file: strings.Repeat("e2", 32), start: 5, end: 6},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fileHash, err := ParseHex(tc.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			shard := buildShard(t,
+				[]ShardFile{{
+					FileHash: fileHash,
+					Terms: []Term{{
+						XorbHash:    xorbHash,
+						UnpackedLen: 16,
+						ChunkStart:  tc.start,
+						ChunkEnd:    tc.end,
+					}},
+				}},
+				[]ShardXorb{{XorbHash: xorbHash, NumChunks: 2, NumBytesInXorb: 16}},
+			)
+			rec := casRequest(t, mux, http.MethodPost, "/xet/v1/shards", writeTok, shard)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("shard upload: status = %d, body %s", rec.Code, rec.Body)
+			}
+			var upload map[string]int
+			if err := json.NewDecoder(rec.Body).Decode(&upload); err != nil {
+				t.Fatal(err)
+			}
+			if upload["result"] != 1 {
+				t.Fatalf("shard upload result = %d, want 1", upload["result"])
+			}
+
+			got := casRequest(t, mux, http.MethodGet, "/xet/v1/reconstructions/"+fileHash.Hex(), readTok, nil)
+			if got.Code != http.StatusInternalServerError {
+				t.Fatalf("reconstruction status = %d, want 500 (body %s)", got.Code, got.Body)
+			}
+			var body map[string]string
+			if err := json.NewDecoder(got.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["error"] != "term chunk range out of bounds" {
+				t.Fatalf("error = %q", body["error"])
+			}
+		})
+	}
+}
+
 // TestReconstructionTermBoundaries: ranges landing exactly on term
 // boundaries select exactly the right terms with the right in-term offset.
 func TestReconstructionTermBoundaries(t *testing.T) {
