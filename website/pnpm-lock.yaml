@@ -13,7 +13,7 @@ importers:
     dependencies:
       marked:
         specifier: ^18.0.5
-        version: 18.2.0
+        version: 18.2.1
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 5.20261116.1
@@ -572,8 +572,8 @@ packages:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
     engines: {node: '>=6'}
 
-  marked@18.2.0:
-    resolution: {integrity: sha512-KaeL+tAbtvI930q7HE2PN5lYXYdT8EiSmxHlN6F3rsfb57wd5mp5W5TLazpdj4inTQBJdgjYwbs40W/0VUGU+Q==}
+  marked@18.2.1:
+    resolution: {integrity: sha512-ii4bxCTCqqwpT86XZWgJNs+ZnAIZksmLGYMViWA7PDIXYIeNo1x6cDdX3JOip9NM/cI6p8z57FxliACboTruMA==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -1005,7 +1005,7 @@ snapshots:
 
   kleur@4.1.5: {}
 
-  marked@18.2.0: {}
+  marked@18.2.1: {}
 
   miniflare@5.20261113.0-beta:
     dependencies:
