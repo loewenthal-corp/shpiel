@@ -6,7 +6,7 @@ require (
 	github.com/alecthomas/kong v1.17.0
 	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/google/go-containerregistry v0.22.1
-	github.com/pierrec/lz4/v4 v4.1.33
+	github.com/pierrec/lz4/v4 v4.1.34
 	github.com/prometheus/client_golang v1.25.0
 	golang.org/x/sync v0.25.0
 	gopkg.in/yaml.v3 v3.0.1
