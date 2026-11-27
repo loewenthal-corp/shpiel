@@ -13,7 +13,7 @@ importers:
     dependencies:
       marked:
         specifier: ^18.0.5
-        version: 18.2.1
+        version: 18.3.0
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 5.20261124.1
@@ -691,8 +691,8 @@ packages:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
     engines: {node: '>=6'}
 
-  marked@18.2.1:
-    resolution: {integrity: sha512-ii4bxCTCqqwpT86XZWgJNs+ZnAIZksmLGYMViWA7PDIXYIeNo1x6cDdX3JOip9NM/cI6p8z57FxliACboTruMA==}
+  marked@18.3.0:
+    resolution: {integrity: sha512-ed8zmPXlBb3UfGXN5iHMQyMhFpdqLgoV5umUXx/Q1R+FW3q8VpqpyoKUwlENL9appo2UMvNLURDVaT3AMOryGA==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -1302,7 +1302,7 @@ snapshots:
 
   kleur@4.1.5: {}
 
-  marked@18.2.1: {}
+  marked@18.3.0: {}
 
   math-intrinsics@1.1.0: {}
 
